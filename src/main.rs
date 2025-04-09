@@ -1,16 +1,17 @@
 use burn::tensor::{backend::Backend, Tensor};
+use tictactoe::TicTacToe;
+mod tictactoe;
 
-fn computation<B: Backend>() {
-    // Create the device where to do the computation
-    let device = Default::default();
-
-    let tensor1: Tensor<B, 2> = Tensor::from_floats([[2., 3.], [4., 5.]], &device);
-    let tensor2 = Tensor::ones_like(&tensor1);
-
-    // Print the element-wise addition of the two tensors.
-    println!("{:}", tensor1 + tensor2);
+fn game<B: Backend>() {
+    let game: TicTacToe<B> = TicTacToe::init();
+    let test = game.get_initial_state();
+    let test2 = game.get_next_state(&test, 8, 1);
+    let test3 = game.get_next_state(&test2, 1, -1);
+    println!("{:}", test);
+    println!("{:}", test2);
+    println!("{:}", test3);
 }
 
 fn main() {
-    computation::<burn::backend::CudaJit>();
+    game::<burn::backend::CudaJit>();
 }
