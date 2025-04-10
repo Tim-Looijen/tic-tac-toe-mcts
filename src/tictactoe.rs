@@ -1,4 +1,4 @@
-use std::{any::Any, string};
+use std::{any::Any, ops::Add, string, vec};
 
 use burn::{
     record::Record,
@@ -54,19 +54,43 @@ impl<B: Backend> TicTacToe<B> {
         return mask;
     }
 
-    pub fn check_win(&self, state: &Tensor<B, 2>, action: i32) -> bool {
-        if action == -1 {
-            return false;
+    pub fn check_win(&self, state: &Tensor<B, 2>, player: i8) -> bool {
+        let summed_rows = state.clone().sum_dim(0);
+        let summed_collumns = state.clone().sum_dim(1);
+
+        let win_on_any_row: bool = summed_rows
+            .clone()
+            .equal_elem(player * 3)
+            .any()
+            .to_data()
+            .into_vec()
+            .unwrap()[0];
+
+        let win_on_any_col: bool = summed_collumns
+            .clone()
+            .equal_elem(player * 3)
+            .any()
+            .to_data()
+            .into_vec()
+            .unwrap()[0];
+
+        let mut diagonal_index: usize = 0;
+        let mut diagonal_index_inversed: usize = 3;
+        let mut diagonal_vec: Vec<f32> = Vec::new();
+        let mut diagonal_inversed_vec: Vec<f32> = Vec::new();
+        for row in state.clone().iter_dim(0) {
+            diagonal_index_inversed -= 1;
+            let row_vec: Vec<f32> = row.to_data().into_vec().unwrap();
+            diagonal_vec.push(row_vec[diagonal_index]);
+            diagonal_inversed_vec.push(row_vec[diagonal_index_inversed]);
+
+            diagonal_index += 1;
         }
-        let state = state.clone();
 
-        let row: usize = action as usize / self.row_count;
-        let column: usize = action as usize % self.column_count;
+        let diagonal_win = diagonal_vec.iter().sum::<f32>() == (player * 3) as f32;
+        let diagonal_inversed_win =
+            diagonal_inversed_vec.iter().sum::<f32>() == (player * 3) as f32;
 
-        let test = state.sum_dim(0);
-
-        println!("{:}", test);
-
-        return true;
+        return win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win;
     }
 }
