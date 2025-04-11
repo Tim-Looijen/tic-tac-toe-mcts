@@ -2,7 +2,7 @@ use std::{any::Any, ops::Add, string, vec};
 
 use burn::{
     record::Record,
-    tensor::{backend::Backend, Bool, Int, Shape, Tensor, TensorKind},
+    tensor::{backend::Backend, Bool, Float, Int, Shape, Tensor, TensorKind},
 };
 
 pub struct TicTacToe<B: Backend> {
@@ -47,7 +47,7 @@ impl<B: Backend> TicTacToe<B> {
         next_state.slice_assign([row..row + 1, column..column + 1], player_tensor)
     }
 
-    pub fn get_valid_moves_as_mask(state: &Tensor<B, 2>) -> Tensor<B, 2, Bool> {
+    pub fn get_valid_moves_as_mask(&self, state: &Tensor<B, 2, Float>) -> Tensor<B, 2, Bool> {
         let valid_moves = state.clone();
         let mask = valid_moves.equal_elem(0);
 
@@ -62,34 +62,29 @@ impl<B: Backend> TicTacToe<B> {
             .clone()
             .equal_elem(player * 3)
             .any()
-            .to_data()
-            .into_vec()
-            .unwrap()[0];
+            .into_scalar();
 
         let win_on_any_col: bool = summed_collumns
             .clone()
             .equal_elem(player * 3)
             .any()
-            .to_data()
-            .into_vec()
-            .unwrap()[0];
+            .into_scalar();
 
         let mut diagonal_index: usize = 0;
         let mut diagonal_index_inversed: usize = 3;
-        let mut diagonal_vec: Vec<f32> = Vec::new();
-        let mut diagonal_inversed_vec: Vec<f32> = Vec::new();
+        let mut diagonal_summed: i8 = 0;
+        let mut diagonal_inversed_summed: i8 = 0;
         for row in state.clone().iter_dim(0) {
             diagonal_index_inversed -= 1;
             let row_vec: Vec<f32> = row.to_data().into_vec().unwrap();
-            diagonal_vec.push(row_vec[diagonal_index]);
-            diagonal_inversed_vec.push(row_vec[diagonal_index_inversed]);
+            diagonal_summed += row_vec[diagonal_index] as i8;
+            diagonal_inversed_summed += row_vec[diagonal_index_inversed] as i8;
 
             diagonal_index += 1;
         }
 
-        let diagonal_win = diagonal_vec.iter().sum::<f32>() == (player * 3) as f32;
-        let diagonal_inversed_win =
-            diagonal_inversed_vec.iter().sum::<f32>() == (player * 3) as f32;
+        let diagonal_win = diagonal_summed == (player * 3);
+        let diagonal_inversed_win = diagonal_inversed_summed == (player * 3);
 
         return win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win;
     }
