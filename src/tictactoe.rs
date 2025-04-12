@@ -35,13 +35,13 @@ impl<B: Backend> TicTacToe<B> {
     pub fn get_next_state(
         &self,
         previous_state: &Tensor<B, 2>,
-        action: i32,
+        action: &Vec<usize>,
         player: i8,
     ) -> Tensor<B, 2> {
         let next_state = previous_state.clone();
 
-        let row: usize = action as usize / self.row_count;
-        let column: usize = action as usize % self.column_count;
+        let row = action[0];
+        let column = action[1];
         let player_tensor = Tensor::from_floats([[player]], &next_state.device());
 
         next_state.slice_assign([row..row + 1, column..column + 1], player_tensor)
@@ -87,5 +87,9 @@ impl<B: Backend> TicTacToe<B> {
         let diagonal_inversed_win = diagonal_inversed_summed == (player * 3);
 
         return win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win;
+    }
+
+    pub fn change_perspective(&self, state: &Tensor<B, 2>) -> Tensor<B, 2> {
+        return state.clone().mul(Tensor::from([[-1]]));
     }
 }
