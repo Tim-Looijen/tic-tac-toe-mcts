@@ -1,5 +1,14 @@
 use rand::{distr::Distribution, rng, Rng};
-use std::{any::Any, collections::HashMap, ops::Add, string, usize, vec};
+use std::{
+    any::Any,
+    cell::RefCell,
+    collections::HashMap,
+    ops::Add,
+    rc::{Rc, Weak},
+    string,
+    sync::Arc,
+    usize, vec,
+};
 
 use bincode::impl_borrow_decode;
 use burn::{
@@ -16,10 +25,11 @@ pub struct Node<'a, B: Backend> {
     game: &'a TicTacToe<B>,
     args: HashMap<&'a str, f32>,
     state: Tensor<B, 2>,
-    parent: Option<&'a Node<'a, B>>,
     action_taken: Vec<usize>,
-    children: Vec<Node<'a, B>>,
     expandable_moves: Tensor<B, 2, Bool>,
+
+    parent: RefCell<Weak<Node<'a, B>>>,
+    children: Vec<Arc<Node<'a, B>>>,
 
     player: i8,
     visit_count: u32,
@@ -32,7 +42,7 @@ impl<'a, B: Backend> Node<'a, B> {
         game: &'a TicTacToe<B>,
         args: HashMap<&'a str, f32>,
         state: Tensor<B, 2, Float>,
-        parent: Option<&'a Node<'a, B>>,
+        parent: RefCell<Weak<Node<'a, B>>>,
         action_taken: Vec<usize>,
         player: i8,
     ) -> Node<'a, B> {
@@ -42,10 +52,11 @@ impl<'a, B: Backend> Node<'a, B> {
             game,
             args,
             state,
-            parent,
             action_taken,
-            children: Vec::new(),
             expandable_moves,
+
+            parent,
+            children: Vec::new(),
 
             player,
             visit_count: 0,
@@ -56,16 +67,26 @@ impl<'a, B: Backend> Node<'a, B> {
 
     pub fn is_fully_expanded(&self) -> bool {
         self.expandable_moves.clone().all().into_scalar() == false
-            && self.children.iter().count() == 0
+            && self.children.to_owned().iter().count() == 0
     }
 
-    pub fn select(&'a self) -> &'a Node<'a, B> {
-        let best_child = self;
+    pub fn select(&'a mut self) -> Option<Arc<Node<'a, B>>> {
+        let mut best_child = None;
+        let mut best_ucb: f32 = f32::NEG_INFINITY;
+
+        for child in self.children.to_owned().into_iter() {
+            let ucb = self.calculate_UCB(&child);
+            if ucb > best_ucb {
+                best_child = Some(child);
+                best_ucb = ucb;
+            }
+        }
+
         return best_child;
     }
 
     #[allow(non_snake_case)]
-    pub fn calculate_UCB(&self, child: &'a Node<'a, B>) -> f32 {
+    pub fn calculate_UCB(&self, child: &Node<'a, B>) -> f32 {
         let w: f32 = child.value_sum;
         let n: f32 = child.visit_count as f32;
         let N: f32 = self.visit_count as f32;
@@ -97,16 +118,16 @@ impl<'a, B: Backend> Node<'a, B> {
             self.game.get_next_state(&self.state, &action, -self.player);
         child_state = self.game.change_perspective(&child_state);
 
-        let mut child = Node::new(
+        let child = Node::new(
             self.game,
             self.args.clone(),
             child_state,
-            Some(self),
+            RefCell::new(std::rc::Weak(self)),
             action,
             -self.player,
         );
 
-        self.children.push(child);
+        self.children.to_owned().push(child.into());
 
         return &self.children.last().unwrap();
     }
