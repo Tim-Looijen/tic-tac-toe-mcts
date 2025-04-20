@@ -1,35 +1,29 @@
+use bincode::impl_borrow_decode;
+use burn::tensor::{
+    backend::Backend, cast::ToElement, Bool, Float, Int, Shape, Tensor, TensorKind,
+};
 use rand::{distr::Distribution, rng, Rng};
 use std::{
-    any::Any,
     cell::RefCell,
     collections::HashMap,
-    ops::Add,
-    rc::{Rc, Weak},
-    string,
-    sync::Arc,
-    usize, vec,
-};
-
-use bincode::impl_borrow_decode;
-use burn::{
-    record::Record,
-    serde::Serialize,
-    tensor::{backend::Backend, cast::ToElement, Bool, Float, Int, Shape, Tensor, TensorKind},
+    rc::{self, Rc, Weak},
+    usize,
 };
 
 use crate::TicTacToe;
 
 static mut NODE_ID: usize = 0;
 
+#[derive(Debug)]
 pub struct Node<'a, B: Backend> {
     game: &'a TicTacToe<B>,
     args: HashMap<&'a str, f32>,
     state: Tensor<B, 2>,
-    action_taken: Vec<usize>,
+    action_taken: Option<(usize, usize)>,
     expandable_moves: Tensor<B, 2, Bool>,
 
-    parent: RefCell<Weak<Node<'a, B>>>,
-    children: Vec<Arc<Node<'a, B>>>,
+    pub parent: Weak<RefCell<Self>>,
+    children: Vec<Rc<RefCell<Node<'a, B>>>>,
 
     player: i8,
     visit_count: u32,
@@ -42,12 +36,13 @@ impl<'a, B: Backend> Node<'a, B> {
         game: &'a TicTacToe<B>,
         args: HashMap<&'a str, f32>,
         state: Tensor<B, 2, Float>,
-        parent: RefCell<Weak<Node<'a, B>>>,
-        action_taken: Vec<usize>,
+        action_taken: Option<(usize, usize)>,
+        parent: Weak<RefCell<Self>>,
         player: i8,
     ) -> Node<'a, B> {
         unsafe { NODE_ID += 1 };
         let expandable_moves = game.get_valid_moves_as_mask(&state);
+
         Node {
             game,
             args,
@@ -61,28 +56,29 @@ impl<'a, B: Backend> Node<'a, B> {
             player,
             visit_count: 0,
             value_sum: 0.0,
+
             id: unsafe { NODE_ID },
         }
     }
 
     pub fn is_fully_expanded(&self) -> bool {
         self.expandable_moves.clone().all().into_scalar() == false
-            && self.children.to_owned().iter().count() == 0
+            && self.children.iter().count() == 0
     }
 
-    pub fn select(&'a mut self) -> Option<Arc<Node<'a, B>>> {
-        let mut best_child = None;
-        let mut best_ucb: f32 = f32::NEG_INFINITY;
+    pub fn select(&'a self) -> &'a RefCell<Node<'a, B>> {
+        let mut best_child_index = 0;
+        let mut best_ucb: f32 = f32::MIN;
 
-        for child in self.children.to_owned().into_iter() {
-            let ucb = self.calculate_UCB(&child);
+        for (i, child) in self.children.iter().enumerate() {
+            let ucb = self.calculate_UCB(&child.borrow());
             if ucb > best_ucb {
-                best_child = Some(child);
+                best_child_index = i;
                 best_ucb = ucb;
             }
         }
 
-        return best_child;
+        return &self.children[best_child_index];
     }
 
     #[allow(non_snake_case)]
@@ -106,33 +102,33 @@ impl<'a, B: Backend> Node<'a, B> {
         return UCB;
     }
 
-    pub fn expand(&'a mut self) -> &'a Node<'a, B> {
-        // -> &'a Node<'a, B> {
-        let action = self.get_random_action();
-        self.expandable_moves = self.expandable_moves.clone().slice_assign(
-            [action[0]..action[0] + 1, action[1]..action[1] + 1],
+    pub fn expand(self_rc: &Rc<RefCell<Self>>) -> Rc<RefCell<Node<'a, B>>> {
+        let mut node = self_rc.borrow_mut();
+        let action = node.get_random_action();
+
+        node.expandable_moves = node.expandable_moves.clone().slice_assign(
+            [action.0..action.0 + 1, action.1..action.1 + 1],
             Tensor::from([[false]]),
         );
 
         let mut child_state: Tensor<B, 2> =
-            self.game.get_next_state(&self.state, &action, -self.player);
-        child_state = self.game.change_perspective(&child_state);
+            node.game.get_next_state(&node.state, &action, -node.player);
+        child_state = node.game.change_perspective(&child_state);
 
-        let child = Node::new(
-            self.game,
-            self.args.clone(),
+        let child = Rc::new(RefCell::new(Node::new(
+            node.game,
+            node.args.clone(),
             child_state,
-            RefCell::new(std::rc::Weak(self)),
-            action,
-            -self.player,
-        );
+            Some(action),
+            Rc::downgrade(self_rc),
+            -node.player,
+        )));
 
-        self.children.to_owned().push(child.into());
-
-        return &self.children.last().unwrap();
+        node.children.push(Rc::clone(&child));
+        child
     }
 
-    fn get_random_action(&self) -> Vec<usize> {
+    fn get_random_action(&self) -> (usize, usize) {
         let valid_moves = self.expandable_moves.clone().argwhere();
 
         let num_indices = valid_moves.dims()[0];
@@ -144,7 +140,7 @@ impl<'a, B: Backend> Node<'a, B> {
             .into_vec::<i32>()
             .unwrap();
 
-        let action: Vec<usize> = Vec::from([index_row_col[0] as usize, index_row_col[1] as usize]);
+        let action: (usize, usize) = (index_row_col[0] as usize, index_row_col[1] as usize);
         return action;
     }
 }
