@@ -71,23 +71,34 @@ impl<B: Backend> TicTacToe<B> {
             .any()
             .into_scalar();
 
-        let mut diagonal_index: usize = 0;
-        let mut diagonal_index_inversed: usize = 3;
         let mut diagonal_summed: i8 = 0;
         let mut diagonal_inversed_summed: i8 = 0;
-        for row in state.clone().iter_dim(0) {
-            diagonal_index_inversed -= 1;
-            let row_vec: Vec<f32> = row.to_data().into_vec().unwrap();
-            diagonal_summed += row_vec[diagonal_index] as i8;
-            diagonal_inversed_summed += row_vec[diagonal_index_inversed] as i8;
 
-            diagonal_index += 1;
+        for (i, row) in state.clone().iter_dim(0).enumerate() {
+            let row_vec: Vec<f32> = row.to_data().into_vec().unwrap();
+            diagonal_summed += row_vec[i] as i8;
+            diagonal_inversed_summed += row_vec[2 - i] as i8;
         }
 
         let diagonal_win = diagonal_summed == (player * 3);
         let diagonal_inversed_win = diagonal_inversed_summed == (player * 3);
 
         return win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win;
+    }
+
+    pub fn get_value_and_terminated(&self, state: &Tensor<B, 2, Float>, player: i8) -> (f32, bool) {
+        // win
+        if self.check_win(state, player) {
+            return (1.0, true);
+        }
+
+        // draw
+        if !self.get_valid_moves_as_mask(state).any().into_scalar() {
+            return (0.5, true);
+        }
+
+        // lose
+        return (0.0, false);
     }
 
     pub fn change_perspective(&self, state: &Tensor<B, 2>) -> Tensor<B, 2> {

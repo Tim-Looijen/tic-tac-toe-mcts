@@ -7,8 +7,7 @@ use std::{
 
 use burn::tensor::{backend::Backend, Tensor};
 use tictactoe::TicTacToe;
-use MCTS::Node;
-
+use MCTS::AlphaMCTS;
 mod MCTS;
 mod tictactoe;
 
@@ -27,18 +26,7 @@ fn game<B: Backend>() {
     let args: HashMap<&str, f32> =
         HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 10000.0)]);
 
-    let root = Rc::new(RefCell::new(Node::new(
-        &game,
-        args,
-        test4,
-        None,
-        Weak::new(),
-        -1,
-    )));
-
-    let child = Node::expand(&root);
-    println!("{:?}", root);
-    println!("{:?}", child.borrow().parent.upgrade());
+    let tree = AlphaMCTS::new(&game, args);
 }
 
 fn main() {
