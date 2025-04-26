@@ -13,22 +13,29 @@ mod tictactoe;
 
 fn game<B: Backend>() {
     let game: TicTacToe<B> = TicTacToe::init();
-    let test = game.get_initial_state();
-    let test2 = game.get_next_state(&test, &(0, 0), -1);
-    let test3 = game.get_next_state(&test2, &(0, 1), -1);
-    let test4 = game.get_next_state(&test3, &(0, 2), -1);
-    println!("{:}", test);
-    println!("{:}", test2);
-    println!("{:}", test3);
-    println!("{:}", test4);
-    println!("{:}", game.check_win(&test4, -1));
+    let args: HashMap<&str, f32> = HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
 
-    let args: HashMap<&str, f32> =
-        HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 10000.0)]);
+    let mut state = game.get_initial_state();
+    let mut player = 1;
+    loop {
+        let mut tree = AlphaMCTS::new(&game, &args);
+        let action = tree.search(&state.clone(), player);
+        println!("{:?}", vec![action]);
+        state = game.get_next_state(&state, &action, player);
+        println!("{:}", state);
 
-    let tree = AlphaMCTS::new(&game, args);
+        if game.check_win(&state, player) {
+            println!("{:} Won", player);
+            return;
+        }
+        player = -player;
+    }
 }
 
 fn main() {
-    game::<burn::backend::CudaJit>();
+    if true {
+        env::set_var("RUST_BACKTRACE", "1");
+    }
+
+    game::<burn::backend::Cuda>();
 }

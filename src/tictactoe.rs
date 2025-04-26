@@ -2,7 +2,7 @@ use std::{any::Any, ops::Add, string, vec};
 
 use burn::{
     record::Record,
-    tensor::{backend::Backend, Bool, Float, Int, Shape, Tensor, TensorKind},
+    tensor::{backend::Backend, cast::ToElement, Bool, Float, Int, Shape, Tensor, TensorKind},
 };
 
 #[derive(Debug)]
@@ -63,13 +63,15 @@ impl<B: Backend> TicTacToe<B> {
             .clone()
             .equal_elem(player * 3)
             .any()
-            .into_scalar();
+            .into_scalar()
+            .to_bool();
 
         let win_on_any_col: bool = summed_collumns
             .clone()
             .equal_elem(player * 3)
             .any()
-            .into_scalar();
+            .into_scalar()
+            .to_bool();
 
         let mut diagonal_summed: i8 = 0;
         let mut diagonal_inversed_summed: i8 = 0;
@@ -93,7 +95,12 @@ impl<B: Backend> TicTacToe<B> {
         }
 
         // draw
-        if !self.get_valid_moves_as_mask(state).any().into_scalar() {
+        if !self
+            .get_valid_moves_as_mask(state)
+            .any()
+            .into_scalar()
+            .to_bool()
+        {
             return (0.5, true);
         }
 

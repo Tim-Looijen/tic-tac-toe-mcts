@@ -1,6 +1,5 @@
-use bincode::impl_borrow_decode;
 use burn::tensor::{
-    backend::Backend, cast::ToElement, Bool, Float, Int, Shape, Tensor, TensorKind,
+    backend::Backend, cast::ToElement, Bool, Device, Float, Int, Shape, Tensor, TensorKind,
 };
 use rand::{distr::Distribution, rng, Rng};
 use std::{
@@ -25,7 +24,7 @@ struct Node<B: Backend> {
     visit_count: u32,
     value_sum: f32,
 
-    tree_index: usize,
+    pub tree_index: usize,
 }
 
 impl<B: Backend> Node<B> {
@@ -56,19 +55,24 @@ impl<B: Backend> Node<B> {
     }
 
     fn is_fully_expanded(&self) -> bool {
-        self.expandable_moves_as_mask.clone().all().into_scalar() == false
-            && self.children_tree_indices.iter().count() == 0
+        self.expandable_moves_as_mask
+            .clone()
+            .any()
+            .into_scalar()
+            .to_bool()
+            == false
+            && self.children_tree_indices.iter().count() > 0
     }
 }
 
 pub struct AlphaMCTS<'a, B: Backend> {
     game: &'a TicTacToe<B>,
-    args: HashMap<&'a str, f32>,
+    args: &'a HashMap<&'a str, f32>,
     tree: Vec<Node<B>>,
 }
 
 impl<'a, B: Backend> AlphaMCTS<'a, B> {
-    pub fn new(game: &'a TicTacToe<B>, args: HashMap<&'a str, f32>) -> AlphaMCTS<'a, B> {
+    pub fn new(game: &'a TicTacToe<B>, args: &'a HashMap<&'a str, f32>) -> AlphaMCTS<'a, B> {
         AlphaMCTS {
             game,
             args,
@@ -76,7 +80,7 @@ impl<'a, B: Backend> AlphaMCTS<'a, B> {
         }
     }
 
-    pub fn search(&mut self, root_state: Tensor<B, 2>, player: i8) {
+    pub fn search(&mut self, root_state: &Tensor<B, 2>, player: i8) -> (usize, usize) {
         let root = Node::new(
             root_state.clone(),
             None,
@@ -88,13 +92,53 @@ impl<'a, B: Backend> AlphaMCTS<'a, B> {
         self.tree.push(root);
 
         for search in 0..self.args["num_searches"] as usize {
-            let mut node = &self.tree.first().unwrap();
+            let mut node_tree_index = self.tree.first().unwrap().tree_index;
+
+            while self.tree[node_tree_index].is_fully_expanded() {
+                node_tree_index = self.select(node_tree_index);
+            }
+            let node = &self.tree[node_tree_index];
+            let value_and_terminated = self.game.get_value_and_terminated(&node.state, node.player);
+
+            let mut value = -value_and_terminated.0;
+            let is_terminal = value_and_terminated.1;
+
+            if !is_terminal {
+                node_tree_index = self.expand(node_tree_index).tree_index;
+                value = self.simulate(node_tree_index);
+            }
+
+            self.backpropagate(node_tree_index, value);
         }
+        let mut action_probs = Tensor::<B, 2>::zeros(
+            Shape::new([self.game.row_count, self.game.column_count]),
+            &<B as Backend>::Device::default(),
+        );
+        let root = &self.tree[0];
+        for child_tree_index in &root.children_tree_indices {
+            let child_tree: usize = child_tree_index.clone();
+            let action = self.tree[child_tree].action_taken.unwrap();
+            action_probs = action_probs.clone().slice_assign(
+                [action.0..action.0 + 1, action.1..action.1 + 1],
+                Tensor::from([[self.tree[child_tree].visit_count]]),
+            );
+        }
+        return self.global_argmax(action_probs);
     }
 
-    pub fn select(&self, node: &Node<B>) -> &Node<B> {
+    fn global_argmax(&self, tensor: Tensor<B, 2>) -> (usize, usize) {
+        let [rows, cols] = tensor.dims();
+        let flattened = tensor.reshape([rows * cols]);
+        let index_1d = flattened.argmax(0).into_scalar().to_usize();
+
+        // Convert back to 2D coordinates
+        (index_1d / cols, index_1d % cols)
+    }
+
+    pub fn select(&self, node_tree_index: usize) -> usize {
         let mut best_child_tree_index = 0;
         let mut best_ucb: f32 = f32::MIN;
+        let node = &self.tree[node_tree_index];
 
         let children: Vec<&Node<B>> = self
             .tree
@@ -114,36 +158,46 @@ impl<'a, B: Backend> AlphaMCTS<'a, B> {
             }
         }
 
-        &self.tree[best_child_tree_index]
+        self.tree[best_child_tree_index].tree_index
     }
 
-    pub fn expand(&mut self, node: &mut Node<B>) -> &Node<B> {
-        let action = self.get_random_action(node);
-        node.expandable_moves_as_mask = node.expandable_moves_as_mask.clone().slice_assign(
-            [action.0..action.0 + 1, action.1..action.1 + 1],
-            Tensor::from([[false]]),
-        );
+    pub fn expand(&mut self, node_tree_index: usize) -> &Node<B> {
+        let action = self.get_random_action(&self.tree[node_tree_index]);
+        self.tree[node_tree_index].expandable_moves_as_mask = self.tree[node_tree_index]
+            .expandable_moves_as_mask
+            .clone()
+            .slice_assign(
+                [action.0..action.0 + 1, action.1..action.1 + 1],
+                Tensor::from([[false]]),
+            );
+
+        let player = &self.tree[node_tree_index].player;
 
         let mut child_state: Tensor<B, 2> =
-            self.game.get_next_state(&node.state, &action, -node.player);
+            self.game
+                .get_next_state(&self.tree[node_tree_index].state, &action, -player);
         child_state = self.game.change_perspective(&child_state);
 
         let child = Node::new(
             child_state.clone(),
             Some(action),
             self.game.get_valid_moves_as_mask(&child_state),
-            Some(node.tree_index),
-            -node.player,
+            Some(node_tree_index),
+            -player,
             self.tree.len(),
         );
 
-        node.children_tree_indices.push(child.tree_index);
+        self.tree[node_tree_index]
+            .children_tree_indices
+            .push(child.tree_index);
 
         self.tree.push(child);
-        &self.tree.last().unwrap()
+
+        self.tree.last_mut().unwrap()
     }
 
-    pub fn simulate(&self, node: &Node<B>) -> f32 {
+    pub fn simulate(&self, node_tree_index: usize) -> f32 {
+        let node = &self.tree[node_tree_index];
         let value_terminated = self.game.get_value_and_terminated(&node.state, node.player);
 
         // Times minus 1 because it is the opponents perspective
@@ -158,7 +212,7 @@ impl<'a, B: Backend> AlphaMCTS<'a, B> {
         let mut rollout_player = -node.player;
 
         loop {
-            let action = self.get_random_action(node);
+            let action = self.get_random_action(&node);
 
             rollout_state = self
                 .game
