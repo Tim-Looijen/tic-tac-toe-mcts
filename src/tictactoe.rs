@@ -1,9 +1,4 @@
-use std::{any::Any, ops::Add, string, vec};
-
-use burn::{
-    record::Record,
-    tensor::{backend::Backend, cast::ToElement, Bool, Float, Int, Shape, Tensor, TensorKind},
-};
+use burn::tensor::{backend::Backend, cast::ToElement, Bool, Float, Tensor};
 
 #[derive(Debug)]
 pub struct TicTacToe<B: Backend> {
@@ -48,11 +43,20 @@ impl<B: Backend> TicTacToe<B> {
         next_state.slice_assign([row..row + 1, column..column + 1], player_tensor)
     }
 
-    pub fn get_valid_moves_as_mask(&self, state: &Tensor<B, 2, Float>) -> Tensor<B, 2, Bool> {
-        let valid_moves = state.clone();
-        let mask = valid_moves.equal_elem(0);
+    pub fn get_legal_moves(&self, state: &Tensor<B, 2, Float>) -> Vec<(usize, usize)> {
+        let legal_moves_as_mask = state.clone().equal_elem(0);
+        if !legal_moves_as_mask.clone().any().into_scalar().to_bool() {
+            return vec![];
+        }
 
-        return mask;
+        legal_moves_as_mask
+            .argwhere()
+            .into_data()
+            .to_vec::<i32>()
+            .unwrap()
+            .chunks_exact(2)
+            .map(|pair| (pair[0] as usize, pair[1] as usize))
+            .collect()
     }
 
     pub fn check_win(&self, state: &Tensor<B, 2>, player: i8) -> bool {
@@ -95,13 +99,8 @@ impl<B: Backend> TicTacToe<B> {
         }
 
         // draw
-        if !self
-            .get_valid_moves_as_mask(state)
-            .any()
-            .into_scalar()
-            .to_bool()
-        {
-            return (0.5, true);
+        if self.get_legal_moves(state).len() == 0 {
+            return (0.0, true);
         }
 
         // lose

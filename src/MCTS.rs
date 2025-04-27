@@ -1,210 +1,160 @@
-use burn::tensor::{
-    backend::Backend, cast::ToElement, Bool, Device, Float, Int, Shape, Tensor, TensorKind,
-};
-use rand::{distr::Distribution, rng, Rng};
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    rc::{Rc, Weak},
-    usize,
-};
+use burn::tensor::{backend::Backend, cast::ToElement, Bool, Float, Shape, Tensor};
+use std::f32;
+use std::{collections::HashMap, usize};
 
 use crate::TicTacToe;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Node<B: Backend> {
     state: Tensor<B, 2>,
-    action_taken: Option<(usize, usize)>,
-    expandable_moves_as_mask: Tensor<B, 2, Bool>,
-
-    parent_tree_index: Option<usize>,
-    children_tree_indices: Vec<usize>,
-
     player: i8,
+    left_over_legal_moves: Vec<(usize, usize)>,
+    action_taken: Option<(usize, usize)>,
+
+    pub index: usize,
+    parent_index: Option<usize>,
+    children_indices: Vec<usize>,
+
     visit_count: u32,
     value_sum: f32,
-
-    pub tree_index: usize,
 }
 
 impl<B: Backend> Node<B> {
     pub fn new(
         state: Tensor<B, 2, Float>,
-        action_taken: Option<(usize, usize)>,
-        expandable_moves_as_mask: Tensor<B, 2, Bool>,
-
-        parent_tree_index: Option<usize>,
         player: i8,
+        legal_moves: Vec<(usize, usize)>,
+        action_taken: Option<(usize, usize)>,
 
-        tree_index: usize,
+        index: usize,
+        parent_index: Option<usize>,
     ) -> Node<B> {
         Node {
             state,
-            action_taken,
-            expandable_moves_as_mask,
-
-            parent_tree_index,
-            children_tree_indices: Vec::new(),
-
             player,
+            left_over_legal_moves: legal_moves,
+            action_taken,
+
+            index,
+            parent_index,
+            children_indices: Vec::new(),
+
             visit_count: 0,
             value_sum: 0.0,
-
-            tree_index,
         }
     }
 
+    /// Checks if this node has been fully expanded, by checking that there are no more legal moves
+    /// and that there are children present
     fn is_fully_expanded(&self) -> bool {
-        self.expandable_moves_as_mask
-            .clone()
-            .any()
-            .into_scalar()
-            .to_bool()
-            == false
-            && self.children_tree_indices.iter().count() > 0
+        self.left_over_legal_moves.len() == 0 && self.children_indices.iter().count() > 0
     }
 }
 
-pub struct AlphaMCTS<'a, B: Backend> {
+pub struct MCTS<'a, B: Backend> {
     game: &'a TicTacToe<B>,
     args: &'a HashMap<&'a str, f32>,
     tree: Vec<Node<B>>,
 }
 
-impl<'a, B: Backend> AlphaMCTS<'a, B> {
-    pub fn new(game: &'a TicTacToe<B>, args: &'a HashMap<&'a str, f32>) -> AlphaMCTS<'a, B> {
-        AlphaMCTS {
+impl<'a, B: Backend> MCTS<'a, B> {
+    pub fn new(
+        game: &'a TicTacToe<B>,
+        args: &'a HashMap<&'a str, f32>,
+        root_state: &Tensor<B, 2>,
+        player: i8,
+    ) -> MCTS<'a, B> {
+        let legal_moves = game.get_legal_moves(root_state);
+        let root = Node::new(root_state.clone(), player, legal_moves, None, 0, None);
+        MCTS {
             game,
             args,
-            tree: vec![],
+            tree: vec![root],
         }
     }
 
-    pub fn search(&mut self, root_state: &Tensor<B, 2>, player: i8) -> (usize, usize) {
-        let root = Node::new(
-            root_state.clone(),
-            None,
-            self.game.get_valid_moves_as_mask(&root_state),
-            None,
-            player,
-            0,
-        );
-        self.tree.push(root);
+    pub fn search(&mut self) -> (usize, usize) {
+        let mut node_index = 0;
+        for search in 0..self.args["num_searches"] as u32 {
+            node_index = self.select(node_index);
 
-        for search in 0..self.args["num_searches"] as usize {
-            let mut node_tree_index = self.tree.first().unwrap().tree_index;
+            let node = &self.tree[node_index];
+            let (mut value, terminated) =
+                self.game.get_value_and_terminated(&node.state, node.player);
 
-            while self.tree[node_tree_index].is_fully_expanded() {
-                node_tree_index = self.select(node_tree_index);
-            }
-            let node = &self.tree[node_tree_index];
-            let value_and_terminated = self.game.get_value_and_terminated(&node.state, node.player);
-
-            let mut value = -value_and_terminated.0;
-            let is_terminal = value_and_terminated.1;
-
-            if !is_terminal {
-                node_tree_index = self.expand(node_tree_index).tree_index;
-                value = self.simulate(node_tree_index);
+            if !terminated {
+                node_index = self.expand(node_index);
+                value = self.simulate(node_index);
             }
 
-            self.backpropagate(node_tree_index, value);
+            self.backpropagate(node_index, value);
         }
-        let mut action_probs = Tensor::<B, 2>::zeros(
-            Shape::new([self.game.row_count, self.game.column_count]),
-            &<B as Backend>::Device::default(),
-        );
-        let root = &self.tree[0];
-        for child_tree_index in &root.children_tree_indices {
-            let child_tree: usize = child_tree_index.clone();
-            let action = self.tree[child_tree].action_taken.unwrap();
-            action_probs = action_probs.clone().slice_assign(
-                [action.0..action.0 + 1, action.1..action.1 + 1],
-                Tensor::from([[self.tree[child_tree].visit_count]]),
-            );
-        }
-        return self.global_argmax(action_probs);
+        self.get_best_action()
     }
 
-    fn global_argmax(&self, tensor: Tensor<B, 2>) -> (usize, usize) {
-        let [rows, cols] = tensor.dims();
-        let flattened = tensor.reshape([rows * cols]);
-        let index_1d = flattened.argmax(0).into_scalar().to_usize();
+    /// Loops through the given nodes children, if any, and returns the child with the best UCB value
+    fn select(&self, node_index: usize) -> usize {
+        let mut node = &self.tree[node_index];
+        while node.is_fully_expanded() {
+            let mut best_child_index = node.index;
+            let mut best_UCB = f32::MIN;
 
-        // Convert back to 2D coordinates
-        (index_1d / cols, index_1d % cols)
-    }
-
-    pub fn select(&self, node_tree_index: usize) -> usize {
-        let mut best_child_tree_index = 0;
-        let mut best_ucb: f32 = f32::MIN;
-        let node = &self.tree[node_tree_index];
-
-        let children: Vec<&Node<B>> = self
-            .tree
-            .iter()
-            .filter(|n| {
-                node.children_tree_indices
-                    .iter()
-                    .any(|&i| i == n.tree_index)
-            })
-            .collect();
-
-        for child in children.iter() {
-            let ucb = self.calculate_UCB(&node, &child);
-            if ucb > best_ucb {
-                best_child_tree_index = child.tree_index;
-                best_ucb = ucb;
+            for child_index in &node.children_indices {
+                let child_index = *child_index;
+                let parent = node;
+                let child = &self.tree[child_index];
+                let ucb = self.calculate_UCB(parent, child);
+                if ucb > best_UCB {
+                    best_child_index = child_index;
+                    best_UCB = ucb;
+                }
             }
+            node = &self.tree[best_child_index];
         }
-
-        self.tree[best_child_tree_index].tree_index
+        node.index
     }
 
-    pub fn expand(&mut self, node_tree_index: usize) -> &Node<B> {
-        let action = self.get_random_action(&self.tree[node_tree_index]);
-        self.tree[node_tree_index].expandable_moves_as_mask = self.tree[node_tree_index]
-            .expandable_moves_as_mask
-            .clone()
-            .slice_assign(
-                [action.0..action.0 + 1, action.1..action.1 + 1],
-                Tensor::from([[false]]),
-            );
+    /// Adds a new child to the node at the given index by selecting a random action
+    /// Also updates the given node's state and legal moves left based on the random chosen action
+    fn expand(&mut self, node_index: usize) -> usize {
+        let node = &self.tree[node_index];
+        let chosen_legal_move = self.get_random_action_as_index(&node.left_over_legal_moves);
+        let action = node.left_over_legal_moves[chosen_legal_move].clone();
+        let player = -node.player; // Child is the opponents from parent perspective
+        let next_state = self.game.get_next_state(&node.state, &action, player);
 
-        let player = &self.tree[node_tree_index].player;
-
-        let mut child_state: Tensor<B, 2> =
-            self.game
-                .get_next_state(&self.tree[node_tree_index].state, &action, -player);
-        child_state = self.game.change_perspective(&child_state);
+        let legal_moves = self.game.get_legal_moves(&next_state);
 
         let child = Node::new(
-            child_state.clone(),
+            next_state.clone(),
+            player,
+            legal_moves,
             Some(action),
-            self.game.get_valid_moves_as_mask(&child_state),
-            Some(node_tree_index),
-            -player,
             self.tree.len(),
+            Some(node.index),
         );
 
-        self.tree[node_tree_index]
-            .children_tree_indices
-            .push(child.tree_index);
+        // The left over legal moves are those which have not been used up as new a child node
+        self.tree[node_index]
+            .left_over_legal_moves
+            .remove(chosen_legal_move);
 
+        self.tree[node_index].children_indices.push(child.index);
         self.tree.push(child);
-
-        self.tree.last_mut().unwrap()
+        self.tree.last().unwrap().index
     }
 
-    pub fn simulate(&self, node_tree_index: usize) -> f32 {
-        let node = &self.tree[node_tree_index];
-        let value_terminated = self.game.get_value_and_terminated(&node.state, node.player);
+    /// Simulates a game into future based of the given nodes' state
+    /// Returns the result/value of that game at the end, while accounting for the change of perspective.
+    fn simulate(&'a self, node_index: usize) -> f32 {
+        let node = &self.tree[node_index];
+        let (value, terminated) = self.game.get_value_and_terminated(&node.state, node.player);
 
-        // Times minus 1 because it is the opponents perspective
-        let value: f32 = -value_terminated.0;
+        // Inverd value because the child is the perspective of the opponent's relative to the parnet
+        // If child won, then that would not be good for the parent, so the value is inverted
+        let value = -value;
 
-        let is_terminal = value_terminated.1;
-        if is_terminal {
+        if terminated {
             return value;
         }
 
@@ -212,57 +162,76 @@ impl<'a, B: Backend> AlphaMCTS<'a, B> {
         let mut rollout_player = -node.player;
 
         loop {
-            let action = self.get_random_action(&node);
-
+            let legal_moves = self.game.get_legal_moves(&rollout_state);
+            let action = self.get_random_action(&legal_moves);
             rollout_state = self
                 .game
                 .get_next_state(&rollout_state, &action, rollout_player);
-
-            let (mut value, is_terminal) = self
+            let (value, terminated) = self
                 .game
                 .get_value_and_terminated(&rollout_state, rollout_player);
 
-            if is_terminal {
-                if node.player != rollout_player {
+            let mut value = -value;
+            if terminated {
+                // Sets the value back to parents perspective
+                if self.tree[node_index].player == rollout_player {
                     value = -value;
                 }
                 return value;
             }
-
             rollout_player = -rollout_player;
         }
     }
 
-    pub fn backpropagate(&mut self, terminal_tree_index: usize, mut value: f32) {
-        self.tree[terminal_tree_index].value_sum += value;
-        self.tree[terminal_tree_index].visit_count += 1;
+    /// Backpropagates the given value to all of the given node's parents
+    /// While accounting for the difference in perspectives while going up the tree
+    fn backpropagate(&mut self, node_index: usize, value: f32) {
+        self.tree[node_index].value_sum += value;
+        self.tree[node_index].visit_count += 1;
 
-        value = -value;
-        let parent_tree_index = self.tree[terminal_tree_index].parent_tree_index;
+        let parent_index = self.tree[node_index].parent_index;
 
-        if parent_tree_index.is_some() {
-            self.backpropagate(parent_tree_index.unwrap(), value);
+        if parent_index.is_some() {
+            self.backpropagate(parent_index.unwrap(), -value);
         }
     }
 
-    fn get_random_action(&self, node: &Node<B>) -> (usize, usize) {
-        let valid_moves = node.expandable_moves_as_mask.clone().argwhere();
+    /// Gets the child of the root with the most amount of visits and returns the action taken
+    fn get_best_action(&self) -> (usize, usize) {
+        let root = &self.tree[0];
+        let mut best_child_index = 0;
+        let mut highest_visit_count = 0;
 
-        let num_indices = valid_moves.dims()[0];
-        let chosen_index = rand::random_range(0..num_indices);
-        let index_row_col = valid_moves
-            .clone()
-            .slice([chosen_index..chosen_index + 1])
-            .into_data()
-            .into_vec::<i32>()
-            .unwrap();
+        for child_index in &root.children_indices {
+            let child_index = child_index.clone();
+            let child = &self.tree[child_index];
+            if child.visit_count > highest_visit_count {
+                best_child_index = child_index;
+                highest_visit_count = child.visit_count;
+            }
+        }
 
-        let action: (usize, usize) = (index_row_col[0] as usize, index_row_col[1] as usize);
-        return action;
+        self.tree[best_child_index].action_taken.unwrap()
     }
 
-    #[allow(non_snake_case)]
-    pub fn calculate_UCB(&self, parent: &Node<B>, child: &Node<B>) -> f32 {
+    /// Choses a random action based on the given node's legal moves left
+    fn get_random_action(&self, legal_moves: &Vec<(usize, usize)>) -> (usize, usize) {
+        let chosen_legal_move = self.get_random_action_as_index(legal_moves);
+        let action = legal_moves[chosen_legal_move];
+        action
+    }
+
+    /// Choses a random action based on the given node's legal moves left, returns the index of the chosen move/action
+    fn get_random_action_as_index(&self, legal_moves: &Vec<(usize, usize)>) -> usize {
+        let num_indices = legal_moves.len();
+        let chosen_index = rand::random_range(0..num_indices);
+
+        chosen_index
+    }
+
+    /// Calculates the UCB for the child, used to determine what 'path' the selection phase should
+    /// take in order to get the desired node.
+    fn calculate_UCB(&self, parent: &Node<B>, child: &Node<B>) -> f32 {
         let w: f32 = child.value_sum;
         let n: f32 = child.visit_count as f32;
         let N: f32 = parent.visit_count as f32;
@@ -271,11 +240,12 @@ impl<'a, B: Backend> AlphaMCTS<'a, B> {
         // Lower means Exploitation, higher means Exploration
         let C: f32 = self.args["C"];
 
-        // avoid devide by zero, this makes the win_odds stay within 0 and 1
-        let win_odds: f32 = (w / (n + 1.0)) / 2.0;
+        // Avoid devide by zero, this makes the win_odds stay within 0 and 1
+        let win_odds_child: f32 = (w / (n + 1.0)) / 2.0;
 
-        // the q is negative because from the perspective of the parent has the other player, so the state is also inverted
-        let q: f32 = -win_odds;
+        // When the child (or opponent) is in a bad situation, it is good for the parent.
+        // Therefore it is flipped here.
+        let q: f32 = 1.0 - win_odds_child;
 
         let UCB: f32 = q + C * f32::sqrt(N.ln_1p() / n);
 

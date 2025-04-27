@@ -1,13 +1,8 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    env,
-    rc::{Rc, Weak},
-};
+use std::{collections::HashMap, env};
 
-use burn::tensor::{backend::Backend, Tensor};
+use burn::tensor::backend::Backend;
 use tictactoe::TicTacToe;
-use MCTS::AlphaMCTS;
+
 mod MCTS;
 mod tictactoe;
 
@@ -17,23 +12,23 @@ fn game<B: Backend>() {
 
     let mut state = game.get_initial_state();
     let mut player = 1;
-    loop {
-        let mut tree = AlphaMCTS::new(&game, &args);
-        let action = tree.search(&state.clone(), player);
-        println!("{:?}", vec![action]);
-        state = game.get_next_state(&state, &action, player);
-        println!("{:}", state);
 
-        if game.check_win(&state, player) {
-            println!("{:} Won", player);
-            return;
+    println!("{:}", state);
+    loop {
+        let mut tree = MCTS::MCTS::new(&game, &args, &state, player);
+        let best_action = tree.search();
+        state = game.get_next_state(&state, &best_action, player);
+        println!("{:}", state);
+        if game.get_value_and_terminated(&state, player).1 {
+            break;
         }
+
         player = -player;
     }
 }
 
 fn main() {
-    if true {
+    if 1 == 1 {
         env::set_var("RUST_BACKTRACE", "1");
     }
 
