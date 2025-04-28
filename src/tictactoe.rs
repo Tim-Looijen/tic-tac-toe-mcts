@@ -104,7 +104,7 @@ impl<B: Backend> TicTacToe<B> {
         }
 
         // lose
-        return (0.0, false);
+        return (-1.0, false);
     }
 
     pub fn change_perspective(&self, state: &Tensor<B, 2>) -> Tensor<B, 2> {

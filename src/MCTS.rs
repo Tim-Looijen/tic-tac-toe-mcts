@@ -177,6 +177,7 @@ impl<'a, B: Backend> MCTS<'a, B> {
                 if self.tree[node_index].player == rollout_player {
                     value = -value;
                 }
+
                 return value;
             }
             rollout_player = -rollout_player;
