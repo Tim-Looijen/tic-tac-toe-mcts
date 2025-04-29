@@ -1,4 +1,7 @@
-use burn::tensor::{backend::Backend, cast::ToElement, Bool, Float, Tensor};
+use std::fmt::Debug;
+
+use burn::module::ModuleDisplay;
+use burn::tensor::{backend::Backend, cast::ToElement, Float, Tensor};
 
 #[derive(Debug)]
 pub struct TicTacToe<B: Backend> {
@@ -100,11 +103,35 @@ impl<B: Backend> TicTacToe<B> {
 
         // draw
         if self.get_legal_moves(state).len() == 0 {
-            return (0.0, true);
+            return (0.5, true);
         }
 
         // lose
         return (-1.0, false);
+    }
+
+    pub fn print_state(state: &Tensor<B, 2>) {
+        let data = state.clone().into_data();
+        let slice: &[f32] = data.as_slice().unwrap();
+        let [rows, cols] = [data.shape[0], data.shape[1]];
+
+        for i in 0..rows {
+            for j in 0..cols {
+                let cell = slice[i * cols + j];
+                if cell > 0.0 {
+                    print!("X");
+                } else if cell < 0.0 {
+                    print!("O");
+                } else {
+                    print!("-");
+                }
+                if j + 1 < cols {
+                    print!("  ");
+                }
+            }
+            println!();
+        }
+        println!("<======>");
     }
 
     pub fn change_perspective(&self, state: &Tensor<B, 2>) -> Tensor<B, 2> {

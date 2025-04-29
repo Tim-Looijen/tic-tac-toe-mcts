@@ -1,4 +1,4 @@
-use burn::tensor::{backend::Backend, cast::ToElement, Bool, Float, Shape, Tensor};
+use burn::tensor::{backend::Backend, Float, Tensor};
 use std::f32;
 use std::{collections::HashMap, usize};
 
@@ -74,9 +74,8 @@ impl<'a, B: Backend> MCTS<'a, B> {
     }
 
     pub fn search(&mut self) -> (usize, usize) {
-        let mut node_index = 0;
         for search in 0..self.args["num_searches"] as u32 {
-            node_index = self.select(node_index);
+            let mut node_index = self.select(0);
 
             let node = &self.tree[node_index];
             let (mut value, terminated) =
@@ -226,7 +225,6 @@ impl<'a, B: Backend> MCTS<'a, B> {
     fn get_random_action_as_index(&self, legal_moves: &Vec<(usize, usize)>) -> usize {
         let num_indices = legal_moves.len();
         let chosen_index = rand::random_range(0..num_indices);
-
         chosen_index
     }
 
@@ -244,9 +242,7 @@ impl<'a, B: Backend> MCTS<'a, B> {
         // Avoid devide by zero, this makes the win_odds stay within 0 and 1
         let win_odds_child: f32 = (w / (n + 1.0)) / 2.0;
 
-        // When the child (or opponent) is in a bad situation, it is good for the parent.
-        // Therefore it is flipped here.
-        let q: f32 = 1.0 - win_odds_child;
+        let q: f32 = win_odds_child;
 
         let UCB: f32 = q + C * f32::sqrt(N.ln_1p() / n);
 
