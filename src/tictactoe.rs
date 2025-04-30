@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 use burn::module::ModuleDisplay;
+use burn::tensor::Device;
 use burn::tensor::{backend::Backend, cast::ToElement, Float, Tensor};
 
 #[derive(Debug)]
@@ -67,14 +68,12 @@ impl<B: Backend> TicTacToe<B> {
         let summed_collumns = state.clone().sum_dim(1);
 
         let win_on_any_row: bool = summed_rows
-            .clone()
             .equal_elem(player * 3)
             .any()
             .into_scalar()
             .to_bool();
 
         let win_on_any_col: bool = summed_collumns
-            .clone()
             .equal_elem(player * 3)
             .any()
             .into_scalar()
@@ -107,7 +106,7 @@ impl<B: Backend> TicTacToe<B> {
         }
 
         // lose
-        return (-1.0, false);
+        return (0.0, false);
     }
 
     pub fn print_state(state: &Tensor<B, 2>) {

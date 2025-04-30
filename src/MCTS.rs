@@ -1,8 +1,43 @@
 use burn::tensor::{backend::Backend, Float, Tensor};
+use log::{self, info};
 use std::f32;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use std::{collections::HashMap, usize};
 
 use crate::TicTacToe;
+
+struct MethodStats {
+    call_count: usize,
+    total_duration: Duration,
+    average_duration: Duration,
+}
+
+impl MethodStats {
+    fn new() -> Self {
+        Self {
+            call_count: 0,
+            total_duration: Duration::ZERO,
+            average_duration: Duration::ZERO,
+        }
+    }
+
+    fn log_call(&mut self, duration: Duration) {
+        self.call_count += 1;
+        self.total_duration += duration;
+        self.average_duration = self.total_duration / self.call_count as u32;
+    }
+
+    fn log_result(&mut self, method: &str) {
+        info!(
+            "{}: Called {} total_duration: {:?} average_duration of {:?}",
+            method, self.call_count, self.total_duration, self.average_duration
+        );
+    }
+}
+
+static METHOD_STATS: std::sync::LazyLock<Mutex<HashMap<&'static str, MethodStats>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 struct Node<B: Backend> {
@@ -72,23 +107,50 @@ impl<'a, B: Backend> MCTS<'a, B> {
             tree: vec![root],
         }
     }
+    fn log_method(method_name: &'static str, duration: Duration) {
+        let mut stats = METHOD_STATS.lock().unwrap();
+        let stat = stats.entry(method_name).or_insert_with(MethodStats::new);
+        stat.log_call(duration);
+    }
+
+    fn log_method_stats(method_names: [&'static str; 5]) {
+        let mut stats = METHOD_STATS.lock().unwrap();
+        for method_name in method_names {
+            let stat = stats.entry(method_name).or_insert_with(MethodStats::new);
+            stat.log_result(method_name);
+        }
+    }
 
     pub fn search(&mut self) -> (usize, usize) {
         for search in 0..self.args["num_searches"] as u32 {
             let mut node_index = self.select(0);
-
             let node = &self.tree[node_index];
+
+            let start = Instant::now();
             let (mut value, terminated) =
                 self.game.get_value_and_terminated(&node.state, node.player);
-
+            MCTS::<B>::log_method("game.get_value_and_terminated", start.elapsed());
             if !terminated {
+                let start = Instant::now();
                 node_index = self.expand(node_index);
+                MCTS::<B>::log_method("expand", start.elapsed());
+
+                let start = Instant::now();
                 value = self.simulate(node_index);
+                MCTS::<B>::log_method("simulate", start.elapsed());
             }
 
             self.backpropagate(node_index, value);
         }
-        self.get_best_action()
+        let best_action = self.get_best_action();
+        MCTS::<B>::log_method_stats([
+            "expand",
+            "simulate",
+            "game.get_value_and_terminated",
+            "game.get_next_state",
+            "game.get_legal_moves",
+        ]);
+        best_action
     }
 
     /// Loops through the given nodes children, if any, and returns the child with the best UCB value
@@ -147,7 +209,9 @@ impl<'a, B: Backend> MCTS<'a, B> {
     /// Returns the result/value of that game at the end, while accounting for the change of perspective.
     fn simulate(&'a self, node_index: usize) -> f32 {
         let node = &self.tree[node_index];
+        let start = Instant::now();
         let (value, terminated) = self.game.get_value_and_terminated(&node.state, node.player);
+        MCTS::<B>::log_method("game.get_value_and_terminated", start.elapsed());
 
         // Inverd value because the child is the perspective of the opponent's relative to the parnet
         // If child won, then that would not be good for the parent, so the value is inverted
@@ -161,14 +225,20 @@ impl<'a, B: Backend> MCTS<'a, B> {
         let mut rollout_player = -node.player;
 
         loop {
+            let start = Instant::now();
             let legal_moves = self.game.get_legal_moves(&rollout_state);
+            MCTS::<B>::log_method("game.get_legal_moves", start.elapsed());
             let action = self.get_random_action(&legal_moves);
+            let start = Instant::now();
             rollout_state = self
                 .game
                 .get_next_state(&rollout_state, &action, rollout_player);
+            MCTS::<B>::log_method("game.get_next_state", start.elapsed());
+            let start = Instant::now();
             let (value, terminated) = self
                 .game
                 .get_value_and_terminated(&rollout_state, rollout_player);
+            MCTS::<B>::log_method("game.get_value_and_terminated", start.elapsed());
 
             let mut value = -value;
             if terminated {
