@@ -4,7 +4,10 @@ use std::{collections::HashMap, env};
 use burn::tensor::backend::Backend;
 use tictactoe::TicTacToe;
 
+use self::chess::Chess;
+
 mod MCTS;
+mod chess;
 mod tests;
 mod tictactoe;
 
@@ -33,6 +36,9 @@ fn main() {
     if 1 == 1 {
         env::set_var("RUST_BACKTRACE", "1");
     }
+    env::set_var("RUST_LOG", "info");
+    env_logger::init();
+    Chess::print_state(&Chess::init().game);
 
-    game::<burn::backend::Cuda>();
+    //game::<burn::backend::Cuda>();
 }
