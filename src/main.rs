@@ -1,26 +1,28 @@
 #![allow(non_snake_case)]
 use std::{collections::HashMap, env};
 
-use self::chess_game::ChessGame;
 use burn::tensor::backend::Backend;
-use chess::Game;
-use tictactoe::TicTacToe;
+use connect4_lib::{ games::connect4};
+
+use crate::{
+    games::{Game, Player, TicTacToe},
+    MCTS::MCTS,
+};
 
 mod MCTS;
-mod chess_game;
-mod tests;
-mod tictactoe;
+//mod tests;
+mod games;
 
 fn game<B: Backend>() {
-    let game: ChessGame = ChessGame::new(Game::new());
+    let game: TicTacToe<B> = TicTacToe::init();
     let args: HashMap<&str, f32> = HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
 
-    let mut state = game.clone();
-    let mut player = -1;
+    let mut state = game.get_initial_state();
+    let mut player = Player::;
 
-    state.print_state();
+    game.print_state(&state);
     loop {
-        let mut tree = MCTS::AlphaMCTS::new(&args, state.clone());
+        let mut tree = MCTS::MCTS::new(&args, state.clone());
         let best_action = tree.search();
         state = state.apply_move_and_clone(best_action);
         state.print_state();
@@ -39,6 +41,8 @@ fn main() {
     }
     env::set_var("RUST_LOG", "info");
     env_logger::init();
+    let game = connect4();
+    println!("{:?}", game.get_board_layout());
 
-    game::<burn::backend::Cuda>();
+    //   game::<burn::backend::Cuda>();
 }

@@ -1,4 +1,5 @@
-use chess::{ChessMove, MoveGen};
+use burn::prelude::Backend;
+use burn::tensor::Tensor;
 use log::{self, info};
 use rand::seq::IteratorRandom;
 use rand::{rng, Rng};
@@ -7,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::{collections::HashMap, usize};
 
-use crate::chess_game::ChessGame;
+use crate::games::{Game, Player};
 
 struct MethodStats {
     call_count: usize,
@@ -41,10 +42,11 @@ impl MethodStats {
 static METHOD_STATS: std::sync::LazyLock<Mutex<HashMap<&'static str, MethodStats>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
-struct ChessGameNode {
-    interface: ChessGame,
-    legal_moves: MoveGen,
-    action_taken: Option<ChessMove>,
+struct Node<B: Backend> {
+    state: Tensor<B, 2>,
+    player: Player,
+    legal_moves: Vec<usize>,
+    action_taken: Option<usize>,
 
     pub index: usize,
     parent_index: Option<usize>,
@@ -54,16 +56,19 @@ struct ChessGameNode {
     value_sum: f32,
 }
 
-impl ChessGameNode {
+impl<B: Backend> Node<B> {
     pub fn new(
-        interface: ChessGame,
-        action_taken: Option<ChessMove>,
+        state: Tensor<B, 2>,
+        player: Player,
+        legal_moves: Vec<usize>,
+        action_taken: Option<usize>,
         index: usize,
         parent_index: Option<usize>,
     ) -> Self {
         Self {
-            interface: interface.clone(),
-            legal_moves: interface.get_legal_moves(),
+            state,
+            player,
+            legal_moves,
             action_taken,
             index,
             parent_index,
@@ -80,16 +85,30 @@ impl ChessGameNode {
     }
 }
 
-pub struct AlphaMCTS<'a> {
-    args: &'a HashMap<&'a str, f32>,
-    tree: Vec<ChessGameNode>,
+pub struct MCTS<B: Backend> {
+    args: HashMap<Box<str>, f32>,
+    game: Box<dyn Game<B>>,
+    tree: Vec<Node<B>>,
 }
 
-impl<'a> AlphaMCTS<'a> {
-    pub fn new(args: &'a HashMap<&'a str, f32>, root_interface: ChessGame) -> AlphaMCTS<'a> {
-        let root = ChessGameNode::new(root_interface, None, 0, None);
-        AlphaMCTS {
+impl<'a, B: Backend> MCTS<B> {
+    pub fn new(
+        args: HashMap<Box<str>, f32>,
+        game: Box<dyn Game<B>>,
+        root_state: Tensor<B, 2>,
+        player: Player,
+    ) -> MCTS<B> {
+        let root = Node::new(
+            root_state.clone(),
+            player,
+            game.get_legal_moves(&root_state),
+            None,
+            0,
+            None,
+        );
+        MCTS {
             args,
+            game,
             tree: vec![root],
         }
     }
@@ -108,29 +127,31 @@ impl<'a> AlphaMCTS<'a> {
         }
     }
 
-    pub fn search(&mut self) -> ChessMove {
+    pub fn search(&mut self) -> usize {
         for search in 0..self.args["num_searches"] as u32 {
             let mut node_index = self.select(0);
             let node = &self.tree[node_index];
 
             let start = Instant::now();
-            let (mut value, terminated) = node.interface.get_value_and_terminated();
-            AlphaMCTS::log_method("node.get_value_and_terminated", start.elapsed());
+            let (mut value, terminated) = self
+                .game
+                .get_value_and_terminated(&node.state, &node.player);
+            MCTS::<B>::log_method("node.get_value_and_terminated", start.elapsed());
             if !terminated {
                 let start = Instant::now();
                 node_index = self.expand(node_index);
-                AlphaMCTS::log_method("expand", start.elapsed());
+                MCTS::<B>::log_method("expand", start.elapsed());
 
                 let start = Instant::now();
                 value = self.simulate(node_index);
-                AlphaMCTS::log_method("simulate", start.elapsed());
+                MCTS::<B>::log_method("simulate", start.elapsed());
             }
 
             self.backpropagate(node_index, value);
         }
 
         let best_action = self.get_best_action();
-        AlphaMCTS::log_method_stats([
+        MCTS::<B>::log_method_stats([
             "expand",
             "simulate",
             "get_random_action",
@@ -167,10 +188,18 @@ impl<'a> AlphaMCTS<'a> {
     /// Also updates the given node's state and legal moves left based on the random chosen action
     fn expand(&mut self, node_index: usize) -> usize {
         let node = &self.tree[node_index];
-        let action = self.get_random_action(node.legal_moves);
-        let next_state = node.interface.apply_move_and_clone(action);
+        let action = self.get_random_action(&node.legal_moves);
+        let next_state = self.game.apply_move(&node.state, &node.player, action);
+        let new_legal_moves = self.game.get_legal_moves(&next_state);
 
-        let child = ChessGameNode::new(next_state, Some(action), self.tree.len(), Some(node_index));
+        let child = Node::new(
+            next_state,
+            node.player.other(),
+            new_legal_moves,
+            Some(action),
+            self.tree.len(),
+            Some(node_index),
+        );
 
         // The left over legal moves are those which have not been used up as new a child node
         self.tree[node_index].children_indices.push(child.index);
@@ -183,8 +212,10 @@ impl<'a> AlphaMCTS<'a> {
     fn simulate(&'a self, node_index: usize) -> f32 {
         let node = &self.tree[node_index];
         let start = Instant::now();
-        let (value, terminated) = node.interface.get_value_and_terminated();
-        AlphaMCTS::log_method("node.get_value_and_terminated", start.elapsed());
+        let (value, terminated) = self
+            .game
+            .get_value_and_terminated(&node.state, &node.player);
+        MCTS::<B>::log_method("node.get_value_and_terminated", start.elapsed());
 
         // Inverd value because the child is the perspective of the opponent's relative to the parnet
         // If child won, then that would not be good for the parent, so the value is inverted
@@ -194,26 +225,36 @@ impl<'a> AlphaMCTS<'a> {
             return value;
         }
 
-        let mut rollout_state = node.interface.clone();
+        let mut rollout_state = node.state.clone();
+        let mut rollout_player = node.player;
 
         loop {
             let start = Instant::now();
-            rollout_state.print_state();
-            let action = self.get_random_action(rollout_state.get_legal_moves());
-            AlphaMCTS::log_method("get_random_action", start.elapsed());
+            self.game.print_state(&rollout_state);
+
+            let action = self.get_random_action(&self.game.get_legal_moves(&rollout_state));
+            MCTS::<B>::log_method("get_random_action", start.elapsed());
+
             let start = Instant::now();
-            rollout_state = rollout_state.apply_move_and_clone(action);
-            AlphaMCTS::log_method("node.get_next_state", start.elapsed());
+            rollout_state = self
+                .game
+                .apply_move(&rollout_state, &rollout_player, action);
+
+            MCTS::<B>::log_method("node.get_next_state", start.elapsed());
             let start = Instant::now();
-            let (value, terminated) = rollout_state.get_value_and_terminated();
-            AlphaMCTS::log_method("node.get_value_and_terminated", start.elapsed());
+            let (value, terminated) = self
+                .game
+                .get_value_and_terminated(&rollout_state, &rollout_player);
+            MCTS::<B>::log_method("node.get_value_and_terminated", start.elapsed());
+
+            rollout_player = rollout_player.other();
 
             let mut value = -value;
             if terminated {
                 // Sets the value back to parents perspective
-                if self.tree[node_index].interface.get_turn() == rollout_state.get_turn() {
-                    value = -value;
-                }
+                //if self.tree[node_index].interface.get_turn() == rollout_state.get_turn() {
+                //value = -value;
+                //}
 
                 return value;
             }
@@ -234,7 +275,7 @@ impl<'a> AlphaMCTS<'a> {
     }
 
     /// Gets the child of the root with the most amount of visits and returns the action taken
-    fn get_best_action(&self) -> ChessMove {
+    fn get_best_action(&self) -> usize {
         let root = &self.tree[0];
         let mut best_child_index = 0;
         let mut highest_visit_count = 0;
@@ -252,15 +293,15 @@ impl<'a> AlphaMCTS<'a> {
     }
 
     /// Choses a random action based on the given node's legal moves left
-    fn get_random_action(&self, legal_moves: MoveGen) -> ChessMove {
-        let mut new_legal_moves = legal_moves.peekable();
+    fn get_random_action(&self, legal_moves: &Vec<usize>) -> usize {
+        let mut new_legal_moves = legal_moves.iter();
         let num_indices = new_legal_moves.len();
         let chosen_index = rand::random_range(0..num_indices);
         new_legal_moves.nth(chosen_index).unwrap().clone()
     }
 
     /// Choses a random action based on the given node's legal moves left, returns the index of the chosen move/action
-    fn get_random_action_as_index(&self, legal_moves: &MoveGen) -> usize {
+    fn get_random_action_as_index(&self, legal_moves: Vec<usize>) -> usize {
         let num_indices = legal_moves.len();
         let chosen_index = rand::random_range(0..num_indices);
         chosen_index
@@ -268,7 +309,7 @@ impl<'a> AlphaMCTS<'a> {
 
     /// Calculates the UCB for the child, used to determine what 'path' the selection phase should
     /// take in order to get the desired node.
-    fn calculate_UCB(&self, parent: &ChessGameNode, child: &ChessGameNode) -> f32 {
+    fn calculate_UCB(&self, parent: &Node<B>, child: &Node<B>) -> f32 {
         let w: f32 = child.value_sum;
         let n: f32 = child.visit_count as f32;
         let N: f32 = parent.visit_count as f32;
