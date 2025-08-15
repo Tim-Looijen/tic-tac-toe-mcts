@@ -1,154 +1,63 @@
 #[cfg(test)]
-mod MCTS {
-    use crate::tictactoe::TicTacToe;
+mod MCTS_tests {
+    use burn::backend::NdArray;
+    use burn::prelude::Backend;
+    use burn::tensor::Tensor;
+    use test_case::test_case;
+
+    use crate::games::{Game, TicTacToe};
     use crate::HashMap;
     use crate::MCTS::MCTS;
 
-    #[test]
-    fn tictactoe_with_1_winning_move_player_one() {
-        let game: TicTacToe<burn::backend::Cuda> = TicTacToe::init();
+    #[test_case(vec![(0, 1, 1), (0, 2, 1)] ; "0-0 player one")]
+    #[test_case(vec![(0, 0, 1), (0, 2, 1)] ; "0-1 player one")]
+    #[test_case(vec![(0, 0, 1), (0, 1, 1)] ; "0-2 player one")]
+    //
+    #[test_case(vec![(1, 1, 1), (1, 2, 1)] ; "1-0 player one")]
+    #[test_case(vec![(1, 0, 1), (1, 2, 1)] ; "1-1 player one")]
+    #[test_case(vec![(1, 0, 1), (1, 1, 1)] ; "1-2 player one")]
+    //
+    #[test_case(vec![(2, 1, 1), (2, 2, 1)] ; "2-0 player one")]
+    #[test_case(vec![(2, 0, 1), (2, 2, 1)] ; "2-1 player one")]
+    #[test_case(vec![(2, 0, 1), (2, 1, 1)] ; "2-2 player one")]
+    //
+    #[test_case(vec![(0, 1, -1), (0, 2, -1)] ; "0-0 player two")]
+    #[test_case(vec![(0, 0, -1), (0, 2, -1)] ; "0-1 player two")]
+    #[test_case(vec![(0, 0, -1), (0, 1, -1)] ; "0-2 player two")]
+    //
+    #[test_case(vec![(1, 1, -1), (1, 2, -1)] ; "1-0 player two")]
+    #[test_case(vec![(1, 0, -1), (1, 2, -1)] ; "1-1 player two")]
+    #[test_case(vec![(1, 0, -1), (1, 1, -1)] ; "1-2 player two")]
+    //
+    #[test_case(vec![(2, 1, -1), (2, 2, -1)] ; "2-0 player two")]
+    #[test_case(vec![(2, 0, -1), (2, 2, -1)] ; "2-1 player two")]
+    #[test_case(vec![(2, 0, -1), (2, 1, -1)] ; "2-2 player two")]
+    fn tictactoe_coords_with_one_winning_move(player_coordinates: Vec<(usize, usize, i8)>) {
+        let game = TicTacToe::<NdArray>::init();
         let args: HashMap<&str, f32> =
             HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
+        let player = player_coordinates.first().unwrap().2;
+        let state = game.create_state(player_coordinates);
 
-        let mut state = game.get_initial_state();
-        state = game.get_next_state(&state, &(1, 0), 1);
-        state = game.get_next_state(&state, &(0, 1), -1);
-        state = game.get_next_state(&state, &(2, 0), 1);
-        state = game.get_next_state(&state, &(0, 2), -1);
+        let mut state = state.clone();
+        game.print_state(&state);
 
-        let MCTS_player: i8 = 1;
+        let best_action =
+            get_best_action(args.clone(), Box::new(TicTacToe::init()), &state, player);
 
-        TicTacToe::print_state(&state);
-        let mut tree = MCTS::new(&game, &args, &state, MCTS_player);
-        let best_action = tree.search();
-        state = game.get_next_state(&state, &best_action, MCTS_player);
+        state = game.apply_move(&state, player, best_action);
 
-        TicTacToe::print_state(&state);
-        assert!(game.check_win(&state, MCTS_player));
+        game.print_state(&state);
+        assert!(TicTacToe::init().check_win(&state, player));
     }
 
-    #[test]
-    fn tictactoe_with_1_winning_move_player_two() {
-        let game: TicTacToe<burn::backend::Cuda> = TicTacToe::init();
-        let args: HashMap<&str, f32> =
-            HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
-
-        let mut state = game.get_initial_state();
-        state = game.get_next_state(&state, &(1, 0), -1);
-        state = game.get_next_state(&state, &(0, 1), 1);
-        state = game.get_next_state(&state, &(2, 0), -1);
-        state = game.get_next_state(&state, &(0, 2), 1);
-
-        let MCTS_player: i8 = -1;
-
-        TicTacToe::print_state(&state);
-        let mut tree = MCTS::new(&game, &args, &state, MCTS_player);
-        let best_action = tree.search();
-        state = game.get_next_state(&state, &best_action, MCTS_player);
-
-        TicTacToe::print_state(&state);
-        assert!(game.check_win(&state, MCTS_player));
-    }
-
-    #[test]
-    fn tictactoe_perfer_draw_over_lose_player_one() {
-        let game: TicTacToe<burn::backend::Cuda> = TicTacToe::init();
-        let args: HashMap<&str, f32> =
-            HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
-
-        let mut state = game.get_initial_state();
-        state = game.get_next_state(&state, &(0, 1), -1);
-        state = game.get_next_state(&state, &(1, 1), -1);
-        state = game.get_next_state(&state, &(2, 2), -1);
-        state = game.get_next_state(&state, &(0, 0), 1);
-        state = game.get_next_state(&state, &(2, 0), 1);
-
-        let MCTS_player: i8 = 1;
-
-        TicTacToe::print_state(&state);
-        let mut tree = MCTS::new(&game, &args, &state, MCTS_player);
-        let best_action = tree.search();
-        state = game.get_next_state(&state, &best_action, MCTS_player);
-
-        TicTacToe::print_state(&state);
-        assert_eq!(best_action, (2, 1));
-    }
-
-    #[test]
-    fn tictactoe_perfer_draw_over_lose_player_two() {
-        let game: TicTacToe<burn::backend::Cuda> = TicTacToe::init();
-        let args: HashMap<&str, f32> =
-            HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
-
-        let mut state = game.get_initial_state();
-        state = game.get_next_state(&state, &(0, 1), 1);
-        state = game.get_next_state(&state, &(1, 1), 1);
-        state = game.get_next_state(&state, &(2, 2), 1);
-        state = game.get_next_state(&state, &(0, 0), -1);
-        state = game.get_next_state(&state, &(2, 0), -1);
-
-        let MCTS_player: i8 = -1;
-
-        TicTacToe::print_state(&state);
-        let mut tree = MCTS::new(&game, &args, &state, MCTS_player);
-        let best_action = tree.search();
-        state = game.get_next_state(&state, &best_action, MCTS_player);
-
-        TicTacToe::print_state(&state);
-        assert_eq!(best_action, (2, 1));
-    }
-
-    #[test]
-    fn tictactoe_second_to_last_move_player_one() {
-        let game: TicTacToe<burn::backend::Cuda> = TicTacToe::init();
-        let args: HashMap<&str, f32> =
-            HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
-
-        let mut state = game.get_initial_state();
-        state = game.get_next_state(&state, &(0, 0), 1);
-        state = game.get_next_state(&state, &(0, 2), 1);
-        state = game.get_next_state(&state, &(1, 2), 1);
-        state = game.get_next_state(&state, &(2, 1), 1);
-        state = game.get_next_state(&state, &(0, 1), -1);
-        state = game.get_next_state(&state, &(1, 1), -1);
-        state = game.get_next_state(&state, &(2, 2), -1);
-
-        let MCTS_player: i8 = -1;
-
-        TicTacToe::print_state(&state);
-        println!("{:?}", game.get_legal_moves(&state));
-        let mut tree = MCTS::new(&game, &args, &state, MCTS_player);
-        let best_action = tree.search();
-        state = game.get_next_state(&state, &best_action, MCTS_player);
-
-        TicTacToe::print_state(&state);
-        assert_eq!(best_action, (2, 0));
-    }
-
-    #[test]
-    fn tictactoe_second_to_last_move_player_two() {
-        let game: TicTacToe<burn::backend::Cuda> = TicTacToe::init();
-        let args: HashMap<&str, f32> =
-            HashMap::from([("C", f32::sqrt(2.0)), ("num_searches", 1000.0)]);
-
-        let mut state = game.get_initial_state();
-        state = game.get_next_state(&state, &(0, 0), -1);
-        state = game.get_next_state(&state, &(0, 2), -1);
-        state = game.get_next_state(&state, &(1, 2), -1);
-        state = game.get_next_state(&state, &(2, 1), -1);
-        state = game.get_next_state(&state, &(0, 1), 1);
-        state = game.get_next_state(&state, &(1, 1), 1);
-        state = game.get_next_state(&state, &(2, 2), 1);
-
-        let MCTS_player: i8 = 1;
-
-        TicTacToe::print_state(&state);
-        println!("{:?}", game.get_legal_moves(&state));
-        let mut tree = MCTS::new(&game, &args, &state, MCTS_player);
-        let best_action = tree.search();
-        state = game.get_next_state(&state, &best_action, MCTS_player);
-
-        TicTacToe::print_state(&state);
-        assert_eq!(best_action, (2, 0));
+    fn get_best_action(
+        args: HashMap<&str, f32>,
+        game: Box<dyn Game<NdArray>>,
+        given_state: &Tensor<NdArray, 2>,
+        player: i8,
+    ) -> (usize, usize) {
+        let mut tree = MCTS::new(args, game, given_state, player);
+        tree.search()
     }
 }

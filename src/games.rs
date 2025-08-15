@@ -1,42 +1,13 @@
 use std::{error::Error, fmt::Debug, num::IntErrorKind};
 
 use burn::tensor::{backend::Backend, cast::ToElement, Float, Tensor};
-
-#[derive(Clone, Copy)]
-pub enum Player {
-    One,
-    MinusOne,
-}
-
-impl Player {
-    pub fn other(&self) -> Self {
-        match self {
-            Player::One => Player::MinusOne,
-            Player::MinusOne => Player::One,
-        }
-    }
-
-    pub fn numerical(&self) -> i8 {
-        match self {
-            Player::One => 1,
-            Player::MinusOne => -1,
-        }
-    }
-
-    pub fn from_number(numerical_player: i8) -> Result<Self, String> {
-        match numerical_player {
-            1 => Ok(Player::One),
-            -1 => Ok(Player::MinusOne),
-            _ => Err(format!("Invalid player, recieved: {}", numerical_player)),
-        }
-    }
-}
+use log::debug;
 
 pub trait Game<B: Backend> {
     fn get_initial_state(&self) -> Tensor<B, 2>;
-    fn get_legal_moves(&self, state: &Tensor<B, 2>) -> Vec<usize>;
-    fn get_value_and_terminated(&self, state: &Tensor<B, 2>, player: &Player) -> (f32, bool);
-    fn apply_move(&self, state: &Tensor<B, 2>, player: &Player, action: usize) -> Tensor<B, 2>;
+    fn get_legal_moves(&self, state: &Tensor<B, 2>) -> Vec<(usize, usize)>;
+    fn get_value_and_terminated(&self, state: &Tensor<B, 2>, player: i8) -> (f32, bool);
+    fn apply_move(&self, state: &Tensor<B, 2>, player: i8, action: (usize, usize)) -> Tensor<B, 2>;
     fn print_state(&self, state: &Tensor<B, 2>);
 }
 
@@ -103,6 +74,17 @@ impl<B: Backend> TicTacToe<B> {
         return win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win;
     }
 
+    pub fn create_state(&self, player_coordinates: Vec<(usize, usize, i8)>) -> Tensor<B, 2> {
+        let mut state = self.get_initial_state();
+        for coordinate_player in player_coordinates {
+            let row = coordinate_player.0;
+            let column = coordinate_player.1;
+            state = self.apply_move(&state, coordinate_player.2, (row, column));
+        }
+
+        state
+    }
+
     pub fn invert_perspective(&self, state: &Tensor<B, 2>) -> Tensor<B, 2> {
         return state.clone().mul(Tensor::from([[-1]]));
     }
@@ -111,31 +93,24 @@ impl<B: Backend> TicTacToe<B> {
 impl<B: Backend> Game<B> for TicTacToe<B> {
     fn get_initial_state(&self) -> Tensor<B, 2> {
         let initial_state: Tensor<B, 2> =
-            Tensor::zeros([self.row_count, self.row_count], &self.device);
+            Tensor::zeros([self.row_count, self.column_count], &self.device);
         return initial_state;
     }
 
-    fn apply_move(
-        &self,
-        state: &Tensor<B, 2>,
-        player: &Player,
-        action: usize, //        &self,
-                       //        previous_state: &Tensor<B, 2>,
-                       //        action: &(usize, usize),
-                       //        player: i8,
-    ) -> Tensor<B, 2> {
+    fn apply_move(&self, state: &Tensor<B, 2>, player: i8, action: (usize, usize)) -> Tensor<B, 2> {
         let next_state = state.clone();
 
-        let row = action;
-        let column = action;
-        let player_tensor = Tensor::from_floats([[player.numerical()]], &self.device);
+        let row = action.0;
+        let column = action.1;
+
+        let player_tensor = Tensor::from_floats([[player]], &self.device);
 
         next_state.slice_assign([row..row + 1, column..column + 1], player_tensor)
     }
 
-    fn get_value_and_terminated(&self, state: &Tensor<B, 2>, player: &Player) -> (f32, bool) {
+    fn get_value_and_terminated(&self, state: &Tensor<B, 2>, player: i8) -> (f32, bool) {
         // win
-        if self.check_win(state, player.numerical()) {
+        if self.check_win(state, player) {
             return (1.0, true);
         }
 
@@ -148,7 +123,7 @@ impl<B: Backend> Game<B> for TicTacToe<B> {
         return (0.0, false);
     }
 
-    fn get_legal_moves(&self, state: &Tensor<B, 2, Float>) -> Vec<usize> {
+    fn get_legal_moves(&self, state: &Tensor<B, 2, Float>) -> Vec<(usize, usize)> {
         let legal_moves_as_mask = state.clone().equal_elem(0);
         if !legal_moves_as_mask.clone().any().into_scalar().to_bool() {
             return vec![];
@@ -157,13 +132,10 @@ impl<B: Backend> Game<B> for TicTacToe<B> {
         legal_moves_as_mask
             .argwhere()
             .into_data()
-            .to_vec::<bool>()
+            .to_vec::<i64>()
             .unwrap()
-            .iter()
-            .map(|cell| match cell {
-                false => 0,
-                true => 1,
-            })
+            .chunks_exact(2)
+            .map(|pair| (pair[0] as usize, pair[1] as usize))
             .collect()
     }
 
@@ -172,6 +144,7 @@ impl<B: Backend> Game<B> for TicTacToe<B> {
         let slice: &[f32] = data.as_slice().unwrap();
         let [rows, cols] = [data.shape[0], data.shape[1]];
 
+        println!();
         for i in 0..rows {
             for j in 0..cols {
                 let cell = slice[i * cols + j];
@@ -188,7 +161,7 @@ impl<B: Backend> Game<B> for TicTacToe<B> {
             }
             println!();
         }
-        println!("<======>");
+        println!();
     }
 }
 

@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-burn = { version = "0.17.1", features = ["cuda"] }
+burn = { version = "0.17.1", features = ["cuda", "ndarray"] }
+test-case = "*"
 connect4-lib = "0.1.0"
 env_logger = "0.11.8"
 log = "0.4.27"
