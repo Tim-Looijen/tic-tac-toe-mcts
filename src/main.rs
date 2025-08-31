@@ -7,14 +7,14 @@ use burn::{
 };
 use connect4_lib::games::connect4;
 
-use crate::games::{Game, TicTacToe};
+use crate::games::TicTacToe;
 
-mod MCTS;
 mod games;
+mod mcts;
 mod tests;
 
 fn game<B: Backend>() {
-    let game: Box<dyn Game<B>> = Box::new(TicTacToe::init());
+    let game = TicTacToe::<B>::init();
     let args: HashMap<&str, f32> =
         HashMap::from([(("C"), f32::sqrt(2.0)), (("num_searches"), 1000.0)]);
 
@@ -23,7 +23,7 @@ fn game<B: Backend>() {
 
     game.print_state(&state);
     loop {
-        let mut tree = MCTS::MCTS::new(args.clone(), Box::new(TicTacToe::init()), &state, player);
+        let mut tree = mcts::Mcts::new(args.clone(), TicTacToe::init(), &state, player);
         let best_action = tree.search();
         state = game.apply_move(&state, player, best_action);
         game.print_state(&state);
@@ -41,8 +41,6 @@ fn main() {
 
     env::set_var("RUST_LOG", "debug");
     env_logger::init();
-    //let game = connect4();
-    //println!("{:?}", game.get_board_layout());
 
     game::<NdArray>();
 }

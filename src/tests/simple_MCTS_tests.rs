@@ -5,7 +5,7 @@ mod MCTS_tests {
     use burn::tensor::Tensor;
     use test_case::test_case;
 
-    use crate::games::{Game, TicTacToe};
+    use crate::games::TicTacToe;
     use crate::HashMap;
     use crate::MCTS::MCTS;
 
@@ -42,8 +42,7 @@ mod MCTS_tests {
         let mut state = state.clone();
         game.print_state(&state);
 
-        let best_action =
-            get_best_action(args.clone(), Box::new(TicTacToe::init()), &state, player);
+        let best_action = get_best_action(args.clone(), TicTacToe::init(), &state, player);
 
         state = game.apply_move(&state, player, best_action);
 
@@ -53,7 +52,7 @@ mod MCTS_tests {
 
     fn get_best_action(
         args: HashMap<&str, f32>,
-        game: Box<dyn Game<NdArray>>,
+        game: TicTacToe<NdArray>,
         given_state: &Tensor<NdArray, 2>,
         player: i8,
     ) -> (usize, usize) {

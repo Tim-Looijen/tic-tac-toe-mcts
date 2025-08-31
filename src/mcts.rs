@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::{collections::HashMap, usize};
 
-use crate::games::Game;
+use crate::games::TicTacToe;
 
 struct Node<B: Backend> {
     state: Tensor<B, 2>,
@@ -53,28 +53,28 @@ impl<B: Backend> Node<B> {
     }
 }
 
-pub struct MCTS<'a, B: Backend> {
+pub struct Mcts<'a, B: Backend> {
     args: HashMap<&'a str, f32>,
-    game: Box<dyn Game<B>>,
+    game: TicTacToe<B>,
     tree: Vec<Node<B>>,
 }
 
-impl<'a, B: Backend> MCTS<'a, B> {
+impl<'a, B: Backend> Mcts<'a, B> {
     pub fn new(
         args: HashMap<&'a str, f32>,
-        game: Box<dyn Game<B>>,
+        game: TicTacToe<B>,
         root_state: &Tensor<B, 2>,
         player: i8,
-    ) -> MCTS<'a, B> {
+    ) -> Mcts<'a, B> {
         let root = Node::new(
             root_state.clone(),
             player,
-            game.get_legal_moves(&root_state),
+            game.get_legal_moves(root_state),
             None,
             0,
             None,
         );
-        MCTS {
+        Mcts {
             args,
             game,
             tree: vec![root],
@@ -97,8 +97,7 @@ impl<'a, B: Backend> MCTS<'a, B> {
             self.backpropagate_MCTS(node_index, value);
         }
 
-        let best_action = self.get_best_action();
-        best_action
+        self.get_best_action()
     }
 
     /// Loops through the given nodes children, if any, and returns the child with the best UCB value
@@ -198,8 +197,8 @@ impl<'a, B: Backend> MCTS<'a, B> {
 
         let parent_index = self.tree[node_index].parent_index;
 
-        if parent_index.is_some() {
-            self.backpropagate_MCTS(parent_index.unwrap(), -value);
+        if let Some(valid_parent_index) = parent_index {
+            self.backpropagate_MCTS(valid_parent_index, -value);
         }
     }
 
@@ -222,7 +221,7 @@ impl<'a, B: Backend> MCTS<'a, B> {
     }
 
     /// Choses a random action based on the given node's legal moves left
-    fn get_random_action(&self, legal_moves: &Vec<(usize, usize)>) -> (usize, (usize, usize)) {
+    fn get_random_action(&self, legal_moves: &[(usize, usize)]) -> (usize, (usize, usize)) {
         let mut new_legal_moves = legal_moves.iter();
         let num_indices = new_legal_moves.len();
         let chosen_index = rand::random_range(0..num_indices);
@@ -250,6 +249,6 @@ impl<'a, B: Backend> MCTS<'a, B> {
 
         let UCB: f32 = q + C * f32::sqrt(N.ln_1p() / n);
 
-        return UCB;
+        UCB
     }
 }
