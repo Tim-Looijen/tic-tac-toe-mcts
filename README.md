@@ -1,6 +1,6 @@
 # Tic Tac Toe with MCTS
 
-A simple Tic Tac Toe game written in Rust that plays automatically using a self-written Monte Carlo Tree Search (MCTS).  
+A Tic Tac Toe game written in Rust that plays automatically using a self-written Monte Carlo Tree Search (MCTS).  
 Made to learn about how MCTS works, will play against itself until game finish when the program will exit.
 
 ## Features
