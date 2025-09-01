@@ -1,46 +1,22 @@
-#![allow(non_snake_case)]
-use std::{collections::HashMap, env};
+use std::env;
 
-use burn::{
-    backend::{Cuda, NdArray},
-    tensor::backend::Backend,
-};
-use connect4_lib::games::connect4;
-
-use crate::games::TicTacToe;
+use crate::play_interface::player_vs_mcts;
 
 mod games;
 mod mcts;
+mod play_interface;
 mod tests;
-
-fn game<B: Backend>() {
-    let game = TicTacToe::<B>::init();
-    let args: HashMap<&str, f32> =
-        HashMap::from([(("C"), f32::sqrt(2.0)), (("num_searches"), 1000.0)]);
-
-    let mut state = game.get_initial_state();
-    let mut player = 1;
-
-    game.print_state(&state);
-    loop {
-        let mut tree = mcts::Mcts::new(args.clone(), TicTacToe::init(), &state, player);
-        let best_action = tree.search();
-        state = game.apply_move(&state, player, best_action);
-        game.print_state(&state);
-
-        if game.get_value_and_terminated(&state, player).1 {
-            break;
-        }
-
-        player = -player;
-    }
-}
 
 fn main() {
     env::set_var("RUST_BACKTRACE", "1");
 
     env::set_var("RUST_LOG", "debug");
-    env_logger::init();
 
-    game::<NdArray>();
+    //if let Err(error) = self_play() {
+    //   eprintln!("Error: {error:?}");
+    //}
+
+    if let Err(error) = player_vs_mcts() {
+        eprintln!("Error: {error:?}");
+    }
 }

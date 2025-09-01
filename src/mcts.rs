@@ -1,22 +1,16 @@
-use burn::prelude::Backend;
-use burn::tensor::Tensor;
-use log::{self, debug, info};
-use rand::seq::IteratorRandom;
-use rand::{rng, Rng};
+use ndarray::Array2;
+use std::collections::HashMap;
 use std::f32;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-use std::{collections::HashMap, usize};
 
 use crate::games::TicTacToe;
 
-struct Node<B: Backend> {
-    state: Tensor<B, 2>,
+struct Node {
+    state: Array2<i8>,
     player: i8,
     legal_moves: Vec<(usize, usize)>,
     action_taken: Option<(usize, usize)>,
 
-    pub index: usize,
+    index: usize,
     parent_index: Option<usize>,
     children_indices: Vec<usize>,
 
@@ -24,9 +18,9 @@ struct Node<B: Backend> {
     value_sum: f32,
 }
 
-impl<B: Backend> Node<B> {
+impl Node {
     pub fn new(
-        state: Tensor<B, 2>,
+        state: Array2<i8>,
         player: i8,
         legal_moves: Vec<(usize, usize)>,
         action_taken: Option<(usize, usize)>,
@@ -53,19 +47,19 @@ impl<B: Backend> Node<B> {
     }
 }
 
-pub struct Mcts<'a, B: Backend> {
+pub struct Mcts<'a> {
     args: HashMap<&'a str, f32>,
-    game: TicTacToe<B>,
-    tree: Vec<Node<B>>,
+    game: TicTacToe,
+    tree: Vec<Node>,
 }
 
-impl<'a, B: Backend> Mcts<'a, B> {
+impl<'a> Mcts<'a> {
     pub fn new(
         args: HashMap<&'a str, f32>,
-        game: TicTacToe<B>,
-        root_state: &Tensor<B, 2>,
+        game: TicTacToe,
+        root_state: &Array2<i8>,
         player: i8,
-    ) -> Mcts<'a, B> {
+    ) -> Mcts<'a> {
         let root = Node::new(
             root_state.clone(),
             player,
@@ -82,7 +76,7 @@ impl<'a, B: Backend> Mcts<'a, B> {
     }
 
     pub fn search(&mut self) -> (usize, usize) {
-        for search in 0..self.args["num_searches"] as u32 {
+        for _ in 0..self.args["num_searches"] as u32 {
             let mut node_index = self.select(0);
             let node = &self.tree[node_index];
 
@@ -94,7 +88,7 @@ impl<'a, B: Backend> Mcts<'a, B> {
                 value = self.simulate(node_index);
             }
 
-            self.backpropagate_MCTS(node_index, value);
+            self.backpropagate(node_index, value);
         }
 
         self.get_best_action()
@@ -144,6 +138,8 @@ impl<'a, B: Backend> Mcts<'a, B> {
         // The left over legal moves are those which have not been used up as new a child node
         self.tree[node_index].children_indices.push(child.index);
         self.tree.push(child);
+
+        #[allow(clippy::unwrap_used)]
         self.tree.last().unwrap().index
     }
 
@@ -191,14 +187,14 @@ impl<'a, B: Backend> Mcts<'a, B> {
 
     /// Backpropagates the given value to all of the given node's parents
     /// While accounting for the difference in perspectives while going up the tree
-    fn backpropagate_MCTS(&mut self, node_index: usize, value: f32) {
+    fn backpropagate(&mut self, node_index: usize, value: f32) {
         self.tree[node_index].value_sum += value;
         self.tree[node_index].visit_count += 1;
 
         let parent_index = self.tree[node_index].parent_index;
 
         if let Some(valid_parent_index) = parent_index {
-            self.backpropagate_MCTS(valid_parent_index, -value);
+            self.backpropagate(valid_parent_index, -value);
         }
     }
 
@@ -217,6 +213,7 @@ impl<'a, B: Backend> Mcts<'a, B> {
             }
         }
 
+        #[allow(clippy::unwrap_used)]
         self.tree[best_child_index].action_taken.unwrap()
     }
 
@@ -227,13 +224,14 @@ impl<'a, B: Backend> Mcts<'a, B> {
         let chosen_index = rand::random_range(0..num_indices);
         (
             chosen_index,
-            new_legal_moves.nth(chosen_index).unwrap().clone(),
+            #[allow(clippy::unwrap_used)]
+            new_legal_moves.nth(chosen_index).unwrap().to_owned(),
         )
     }
 
     /// Calculates the UCB for the child, used to determine what 'path' the selection phase should
     /// take in order to get the desired node.
-    fn calculate_UCB(&self, parent: &Node<B>, child: &Node<B>) -> f32 {
+    fn calculate_UCB(&self, parent: &Node, child: &Node) -> f32 {
         let w: f32 = child.value_sum;
         let n: f32 = child.visit_count as f32;
         let N: f32 = parent.visit_count as f32;

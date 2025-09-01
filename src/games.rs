@@ -1,62 +1,46 @@
-use std::{error::Error, fmt::Debug, num::IntErrorKind};
+use std::fmt::Debug;
 
-use burn::tensor::{backend::Backend, cast::ToElement, Float, Tensor};
-use log::debug;
+use anyhow::{anyhow, Result};
+use ndarray::{Array2, Axis};
 
 #[derive(Debug)]
-pub struct TicTacToe<B: Backend> {
+pub struct TicTacToe {
     pub row_count: usize,
     pub column_count: usize,
-    pub play_space: usize,
-    pub action_size: usize,
-    device: <B as Backend>::Device,
-    pub title: &'static str,
 }
 
-impl<B: Backend> TicTacToe<B> {
-    pub fn init() -> TicTacToe<B> {
+impl TicTacToe {
+    pub fn init() -> TicTacToe {
         TicTacToe {
             row_count: 3,
             column_count: 3,
-            play_space: 9,
-            action_size: 9,
-            device: Default::default(),
-            title: "TicTacToe",
         }
     }
 
-    pub fn check_win(&self, state: &Tensor<B, 2>, player: i8) -> bool {
-        let summed_rows = state.clone().sum_dim(0);
-        let summed_collumns = state.clone().sum_dim(1);
+    pub fn check_win(&self, state: &Array2<i8>, player: i8) -> bool {
+        let state = state.clone();
+        let summed_rows = state.sum_axis(Axis(0));
+        let summed_collumns = state.sum_axis(Axis(1));
 
-        let win_on_any_row: bool = summed_rows
-            .equal_elem(player * 3)
-            .any()
-            .into_scalar()
-            .to_bool();
-
-        let win_on_any_col: bool = summed_collumns
-            .equal_elem(player * 3)
-            .any()
-            .into_scalar()
-            .to_bool();
+        let win_on_any_row: bool = summed_rows.iter().any(|&x| x == player * 3);
+        let win_on_any_col: bool = summed_collumns.iter().any(|&x| x == player * 3);
 
         let mut diagonal_summed: i8 = 0;
         let mut diagonal_inversed_summed: i8 = 0;
 
-        for (i, row) in state.clone().iter_dim(0).enumerate() {
-            let row_vec: Vec<f32> = row.to_data().into_vec().unwrap();
-            diagonal_summed += row_vec[i] as i8;
-            diagonal_inversed_summed += row_vec[2 - i] as i8;
+        for (i, row) in state.axis_iter(Axis(0)).enumerate() {
+            let row_vec = row.to_vec();
+            diagonal_summed += row_vec[i];
+            diagonal_inversed_summed += row_vec[2 - i];
         }
 
         let diagonal_win = diagonal_summed == (player * 3);
         let diagonal_inversed_win = diagonal_inversed_summed == (player * 3);
 
-        return win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win;
+        win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win
     }
 
-    pub fn create_state(&self, player_coordinates: Vec<(usize, usize, i8)>) -> Tensor<B, 2> {
+    pub fn create_state(&self, player_coordinates: Vec<(usize, usize, i8)>) -> Array2<i8> {
         let mut state = self.get_initial_state();
         for coordinate_player in player_coordinates {
             let row = coordinate_player.0;
@@ -67,75 +51,60 @@ impl<B: Backend> TicTacToe<B> {
         state
     }
 
-    pub fn invert_perspective(&self, state: &Tensor<B, 2>) -> Tensor<B, 2> {
-        return state.clone().mul(Tensor::from([[-1]]));
+    pub fn get_initial_state(&self) -> Array2<i8> {
+        Array2::<i8>::zeros([self.row_count, self.column_count])
     }
 
-    pub fn get_initial_state(&self) -> Tensor<B, 2> {
-        let initial_state: Tensor<B, 2> =
-            Tensor::zeros([self.row_count, self.column_count], &self.device);
-        return initial_state;
-    }
-
-    pub fn apply_move(
-        &self,
-        state: &Tensor<B, 2>,
-        player: i8,
-        action: (usize, usize),
-    ) -> Tensor<B, 2> {
-        let next_state = state.clone();
+    pub fn apply_move(&self, state: &Array2<i8>, player: i8, action: (usize, usize)) -> Array2<i8> {
+        let mut next_state = state.clone();
 
         let row = action.0;
         let column = action.1;
 
-        let player_tensor = Tensor::from_floats([[player]], &self.device);
-
-        next_state.slice_assign([row..row + 1, column..column + 1], player_tensor)
+        next_state[[row, column]] = player;
+        next_state
     }
 
-    pub fn get_value_and_terminated(&self, state: &Tensor<B, 2>, player: i8) -> (f32, bool) {
+    pub fn get_value_and_terminated(&self, state: &Array2<i8>, player: i8) -> (f32, bool) {
         // win
         if self.check_win(state, player) {
             return (1.0, true);
         }
 
         // draw
-        if self.get_legal_moves(state).len() == 0 {
+        if self.get_legal_moves(state).is_empty() {
             return (0.5, true);
         }
 
         // lose
-        return (0.0, false);
+        (0.0, false)
     }
 
-    pub fn get_legal_moves(&self, state: &Tensor<B, 2, Float>) -> Vec<(usize, usize)> {
-        let legal_moves_as_mask = state.clone().equal_elem(0);
-        if !legal_moves_as_mask.clone().any().into_scalar().to_bool() {
+    pub fn get_legal_moves(&self, state: &Array2<i8>) -> Vec<(usize, usize)> {
+        let legal_moves_as_mask: Array2<bool> = state.clone().map(|&x| x == 0);
+        if !legal_moves_as_mask.iter().any(|&x| x) {
             return vec![];
         }
-
         legal_moves_as_mask
-            .argwhere()
-            .into_data()
-            .to_vec::<i64>()
-            .unwrap()
-            .chunks_exact(2)
-            .map(|pair| (pair[0] as usize, pair[1] as usize))
+            .indexed_iter()
+            .filter_map(|(idx, &val)| if val { Some((idx.0, idx.1)) } else { None })
             .collect()
     }
 
-    pub fn print_state(&self, state: &Tensor<B, 2>) {
-        let data = state.clone().into_data();
-        let slice: &[f32] = data.as_slice().unwrap();
-        let [rows, cols] = [data.shape[0], data.shape[1]];
+    pub fn print_state(&self, state: &Array2<i8>) -> Result<()> {
+        let data = state.clone();
+        let slice: &[i8] = data
+            .as_slice()
+            .ok_or(anyhow!("Unable to slice this array: {:?}", state))?;
+        let [rows, cols] = [data.shape()[0], data.shape()[1]];
 
         println!();
         for i in 0..rows {
             for j in 0..cols {
                 let cell = slice[i * cols + j];
-                if cell > 0.0 {
+                if cell > 0 {
                     print!("X");
-                } else if cell < 0.0 {
+                } else if cell < 0 {
                     print!("O");
                 } else {
                     print!("-");
@@ -147,5 +116,6 @@ impl<B: Backend> TicTacToe<B> {
             println!();
         }
         println!();
+        Ok(())
     }
 }
