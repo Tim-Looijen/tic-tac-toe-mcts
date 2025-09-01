@@ -3,16 +3,6 @@
 version = 4
 
 [[package]]
-name = "alphazero"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ndarray",
- "rand",
- "test-case",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -231,6 +221,16 @@ dependencies = [
  "quote",
  "syn",
  "test-case-core",
+]
+
+[[package]]
+name = "tic-tac-toe-mcts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ndarray",
+ "rand",
+ "test-case",
 ]
 
 [[package]]
