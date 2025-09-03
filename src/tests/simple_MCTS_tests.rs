@@ -1,12 +1,13 @@
 #[cfg(test)]
 mod MCTS_tests {
+    use std::collections::HashMap;
+
     use anyhow::{Ok, Result};
     use ndarray::Array2;
     use test_case::test_case;
 
     use crate::games::TicTacToe;
     use crate::mcts::Mcts;
-    use crate::HashMap;
 
     #[test_case(vec![(0, 1, 1), (0, 2, 1)] ; "0-0 player one")]
     #[test_case(vec![(0, 0, 1), (0, 2, 1)] ; "0-1 player one")]

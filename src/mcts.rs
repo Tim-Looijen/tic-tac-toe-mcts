@@ -95,6 +95,7 @@ impl<'a> Mcts<'a> {
     }
 
     /// Loops through the given nodes children, if any, and returns the child with the best UCB value
+    #[allow(non_snake_case)]
     fn select(&self, node_index: usize) -> usize {
         let mut node = &self.tree[node_index];
         while node.is_fully_expanded() {
@@ -231,6 +232,7 @@ impl<'a> Mcts<'a> {
 
     /// Calculates the UCB for the child, used to determine what 'path' the selection phase should
     /// take in order to get the desired node.
+    #[allow(non_snake_case)]
     fn calculate_UCB(&self, parent: &Node, child: &Node) -> f32 {
         let w: f32 = child.value_sum;
         let n: f32 = child.visit_count as f32;

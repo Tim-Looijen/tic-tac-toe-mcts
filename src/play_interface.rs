@@ -10,8 +10,13 @@ use ndarray::Array2;
 use crate::{games::TicTacToe, mcts::Mcts};
 
 pub fn choose_play_option() -> Result<()> {
-    loop {
-        print!("Which player, X/x or O/o: ");
+        print!("Play against MCTS (option '1') or let MCTS play against itself (option '2')?");
+    let chosen_option = loop {
+        let input = get_input()?;
+        let chosen_option = match input.chars() {
+
+}
+
         // Choose mcts self play, or play against mcts
         // On terminated, chose again
         // provide way to exit loop
