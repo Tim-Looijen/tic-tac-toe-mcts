@@ -70,7 +70,7 @@ fn get_input() -> Result<String> {
     Ok(input)
 }
 
-pub fn self_play() -> Result<()> {
+pub fn self_play() -> Result<f32> {
     let game = TicTacToe::init();
     let args: HashMap<&str, f32> =
         HashMap::from([(("C"), f32::sqrt(2.0)), (("num_searches"), 1000.0)]);
@@ -84,14 +84,14 @@ pub fn self_play() -> Result<()> {
         let best_action = tree.search();
         state = game.apply_move(&state, player, best_action);
         game.print_state(&state)?;
+        let (value, terminated) = game.get_value_and_terminated(&state, player);
 
-        if game.get_value_and_terminated(&state, player).1 {
-            break;
+        if terminated {
+            break Ok(value);
         }
 
         player = -player;
     }
-    Ok(())
 }
 
 pub fn player_vs_mcts() -> Result<()> {

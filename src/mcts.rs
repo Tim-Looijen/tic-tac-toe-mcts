@@ -177,7 +177,7 @@ impl<'a> Mcts<'a> {
             let mut value = value;
             if terminated {
                 // Sets the value back to parents perspective
-                if self.tree[node_index].player == rollout_player {
+                if self.tree[node_index].player != rollout_player {
                     value = -value;
                 }
 
