@@ -4,23 +4,51 @@ use std::{
     usize,
 };
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ndarray::Array2;
 
 use crate::{games::TicTacToe, mcts::Mcts};
 
 pub fn choose_play_option() -> Result<()> {
-        print!("Play against MCTS (option '1') or let MCTS play against itself (option '2')?");
+    println!("Play against MCTS (option '1') or let MCTS play against itself (option '2')? ");
+    print!("Choose here (to quit, press 'q'): ");
     let chosen_option = loop {
         let input = get_input()?;
-        let chosen_option = match input.chars() {
 
-}
+        if let [chosen_option] = input.chars().collect::<Vec<_>>()[..] {
+            if chosen_option.eq_ignore_ascii_case(&'q') {
+                break 0;
+            }
+            if let Some(option) = chosen_option.to_digit(10) {
+                if option > 0 && option < 3 {
+                    break option as usize;
+                }
+            }
+        }
+
+        print!(
+            "Invalid syntax (\"{}\"), please only provide 1 number, a '1' or a '2': ",
+            input
+        );
 
         // Choose mcts self play, or play against mcts
         // On terminated, chose again
         // provide way to exit loop
-    }
+    };
+
+    match chosen_option {
+        1 => {
+            println!("Good luck and have fun!");
+            player_vs_mcts()?;
+        }
+
+        2 => {
+            println!("Watch them fight!");
+            self_play()?;
+        }
+        _ => return Ok(()),
+    };
+    choose_play_option()?;
 
     Ok(())
 }
@@ -67,14 +95,14 @@ pub fn self_play() -> Result<()> {
 }
 
 pub fn player_vs_mcts() -> Result<()> {
-    print!("Which player, X/x or O/o: ");
+    print!("Which player, X/x or O/o? ");
     let mut chosen_player: i8;
     loop {
         let player_input = get_input()?;
 
         chosen_player = match player_input.to_lowercase().trim() {
-            "X" | "x" => 1,
-            "O" | "o" => -1,
+            "x" => 1,
+            "o" => -1,
             _ => 0,
         };
 
@@ -105,7 +133,12 @@ pub fn player_vs_mcts() -> Result<()> {
         let (value, terminated) = game.get_value_and_terminated(&state, chosen_player);
 
         if terminated {
-            // Either draw or player won
+            if value == 1.0 {
+                println!("Congratulations, you beat the MCTS algorithm!")
+            } else {
+                println!(r"Welp, its a draw ¯\_(ツ)_/¯");
+            }
+            rematch_option()?;
             break;
         }
 
@@ -113,7 +146,12 @@ pub fn player_vs_mcts() -> Result<()> {
         let (value, terminated) = game.get_value_and_terminated(&state, mcts_player);
 
         if terminated {
-            // Either draw or MCTS won
+            if value == 1.0 {
+                println!("You lost against MCTS...");
+            } else {
+                println!(r"Welp, its a draw ¯\_(ツ)_/¯");
+            }
+            rematch_option()?;
             break;
         }
     }
@@ -135,28 +173,40 @@ fn mcts_turn(game: &TicTacToe, state: &Array2<i8>, mcts_player: i8) -> Result<Ar
 
 fn player_turn(game: &TicTacToe, state: &Array2<i8>, chosen_player: i8) -> Result<Array2<i8>> {
     let chosen_player_as_char = if chosen_player == 1 { "X" } else { "O" };
+    let legal_moves = game.get_legal_moves(state);
 
-    println!("Valid options: {:?}", game.get_legal_moves(state));
+    println!("Valid options: {:?}", legal_moves);
     print!(
-        "Where do you want to put the {}? (Enter the row and then the column, such as '01')",
+        "Where do you want to put the {}? (Enter the row and then the column, such as '01') ",
         chosen_player_as_char
     );
 
     let chosen_action = loop {
-        let input = get_input()?;
-
-        if let [chosen_row, chosen_column] = input.chars().collect::<Vec<_>>()[..] {
-            if let (Some(row), Some(col)) = (chosen_row.to_digit(10), chosen_column.to_digit(10)) {
-                if row <= 2 && col <= 2 {
-                    break (row as usize, col as usize);
+        let chosen_action = loop {
+            let input = get_input()?;
+            if let [chosen_row, chosen_column] = input.chars().collect::<Vec<_>>()[..] {
+                if let (Some(row), Some(col)) =
+                    (chosen_row.to_digit(10), chosen_column.to_digit(10))
+                {
+                    if row <= 2 && col <= 2 {
+                        break (row as usize, col as usize);
+                    }
                 }
             }
-        }
 
-        print!(
-            "Invalid syntax (\"{}\"), please only provide 2 numbers, between 0 and 2: ",
-            input
-        );
+            print!(
+                "Invalid syntax (\"{}\"), please only provide 2 numbers, between 0 and 2: ",
+                input
+            );
+        };
+        if !legal_moves.contains(&chosen_action) {
+            print!(
+                "Illegal move: {:?}, position already taken! ",
+                chosen_action
+            );
+        } else {
+            break chosen_action;
+        }
     };
 
     print!(
@@ -168,4 +218,26 @@ fn player_turn(game: &TicTacToe, state: &Array2<i8>, chosen_player: i8) -> Resul
     game.print_state(&state)?;
 
     Ok(state.clone())
+}
+
+fn rematch_option() -> Result<()> {
+    print!("Would you like a rematch? ");
+    let rematch = loop {
+        let input = get_input()?;
+        if let [chosen_option] = input.chars().collect::<Vec<_>>()[..] {
+            if chosen_option.eq_ignore_ascii_case(&'y') || chosen_option.eq_ignore_ascii_case(&'n')
+            {
+                break chosen_option.to_ascii_lowercase();
+            }
+        }
+
+        print!(
+            "Invalid syntax (\"{}\"), please only provide a 'Y' or a 'N': ",
+            input
+        );
+    };
+    if rematch == 'y' {
+        player_vs_mcts()?;
+    }
+    Ok(())
 }

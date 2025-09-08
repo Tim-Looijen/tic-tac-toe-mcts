@@ -1,6 +1,6 @@
 use std::env;
 
-use crate::play_interface::player_vs_mcts;
+use crate::play_interface::{choose_play_option, player_vs_mcts};
 
 mod games;
 mod mcts;
@@ -16,7 +16,7 @@ fn main() {
     //   eprintln!("Error: {error:?}");
     //}
 
-    if let Err(error) = player_vs_mcts() {
+    if let Err(error) = choose_play_option() {
         eprintln!("Error: {error:?}");
     }
 }
