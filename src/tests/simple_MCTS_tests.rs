@@ -58,24 +58,30 @@ mod MCTS_tests {
         #[allow(clippy::unwrap_used)]
         let state = game.create_state(player_coordinates);
 
-        for _ in 0..8 {
+        let mut num_non_draws = 0;
+
+        for _ in 0..100 {
             let mut state = state.clone();
-            game.print_state(&state)?;
             let mut rollout_player = player;
             loop {
                 let best_action =
                     get_best_action(args.clone(), TicTacToe::init(), &state, rollout_player);
                 state = game.apply_move(&state, rollout_player, best_action);
-                game.print_state(&state)?;
+
                 let (value, terminated) = game.get_value_and_terminated(&state, rollout_player);
 
                 if terminated {
-                    assert!(value == 0.5);
+                    if value != 0.5 {
+                        num_non_draws += 1;
+                    }
                     break;
                 }
                 rollout_player = -rollout_player;
             }
         }
+
+        println!("{}", num_non_draws);
+        assert!(num_non_draws == 0);
         Ok(())
     }
 

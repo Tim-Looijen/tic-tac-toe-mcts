@@ -40,6 +40,7 @@ impl TicTacToe {
         win_on_any_col || win_on_any_row || diagonal_win || diagonal_inversed_win
     }
 
+    #[allow(dead_code)] // Used inside tests
     pub fn create_state(&self, player_coordinates: Vec<(usize, usize, i8)>) -> Array2<i8> {
         let mut state = self.get_initial_state();
         for coordinate_player in player_coordinates {

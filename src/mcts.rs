@@ -152,10 +152,8 @@ impl<'a> Mcts<'a> {
 
         // Inverd value because the child is the perspective of the opponent's relative to the parnet
         // If child won, then that would not be good for the parent, so the value is inverted
-        let value = -value;
-
         if terminated {
-            return value;
+            return -value;
         }
 
         let mut rollout_state = node.state.clone();
@@ -168,21 +166,21 @@ impl<'a> Mcts<'a> {
                 .game
                 .apply_move(&rollout_state, rollout_player, index_action.1);
 
-            let (value, terminated) = self
+            let (mut value, terminated) = self
                 .game
                 .get_value_and_terminated(&rollout_state, rollout_player);
 
-            rollout_player = -rollout_player;
-
-            let mut value = value;
             if terminated {
                 // Sets the value back to parents perspective
-                if self.tree[node_index].player != rollout_player {
+                if self.tree[node_index].player == rollout_player && value != 0.5 {
                     value = -value;
                 }
+                println!("{}", value);
 
                 return value;
             }
+
+            rollout_player *= -1;
         }
     }
 
@@ -220,14 +218,8 @@ impl<'a> Mcts<'a> {
 
     /// Choses a random action based on the given node's legal moves left
     fn get_random_action(&self, legal_moves: &[(usize, usize)]) -> (usize, (usize, usize)) {
-        let mut new_legal_moves = legal_moves.iter();
-        let num_indices = new_legal_moves.len();
-        let chosen_index = rand::random_range(0..num_indices);
-        (
-            chosen_index,
-            #[allow(clippy::unwrap_used)]
-            new_legal_moves.nth(chosen_index).unwrap().to_owned(),
-        )
+        let chosen_index = rand::random_range(0..legal_moves.len());
+        (chosen_index, legal_moves[chosen_index])
     }
 
     /// Calculates the UCB for the child, used to determine what 'path' the selection phase should
@@ -242,8 +234,7 @@ impl<'a> Mcts<'a> {
         // Lower means Exploitation, higher means Exploration
         let C: f32 = self.args["C"];
 
-        // Avoid devide by zero, this makes the win_odds stay within 0 and 1
-        let win_odds_child: f32 = (w / (n + 1.0)) / 2.0;
+        let win_odds_child: f32 = if n > 0.0 { w / n } else { 0.0 };
 
         let q: f32 = win_odds_child;
 

@@ -1,10 +1,9 @@
 use std::{
     collections::HashMap,
     io::{stdin, stdout, Write},
-    usize,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use ndarray::Array2;
 
 use crate::{games::TicTacToe, mcts::Mcts};
@@ -30,27 +29,22 @@ pub fn choose_play_option() -> Result<()> {
             "Invalid syntax (\"{}\"), please only provide 1 number, a '1' or a '2': ",
             input
         );
-
-        // Choose mcts self play, or play against mcts
-        // On terminated, chose again
-        // provide way to exit loop
     };
 
     match chosen_option {
         1 => {
             println!("Good luck and have fun!");
             player_vs_mcts()?;
+            choose_play_option()
         }
 
         2 => {
             println!("Watch them fight!");
             self_play()?;
+            choose_play_option()
         }
-        _ => return Ok(()),
-    };
-    choose_play_option()?;
-
-    Ok(())
+        _ => Ok(()),
+    }
 }
 
 fn get_input() -> Result<String> {
